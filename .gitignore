@@ -1,10 +1,7 @@
 *.out
 *.vcd
-*.hex
 __pycache__/
 *.pyc
 .DS_Store
 runs/*/logs/stage5-synthesis.log
 syn/*_synth.v
-syn/area_report.txt
-*.vcd

@@ -1,42 +1,35 @@
 # Yosys synthesis script for fma_fp32_dot3
-# Target: SKY130 HD typical corner
+# Target: SKY130 HD typical corner (sky130_fd_sc_hd__tt_025C_1v80)
+#
+# This file is a TEMPLATE. @SKY130LIB@ and @CLOCK_PERIOD@ are substituted by
+# the Makefile (`make synth`). To run by hand:
+#   sed -e 's|@SKY130LIB@|/path/to/sky130_fd_sc_hd__tt_025C_1v80.lib|g' \
+#       -e 's|@CLOCK_PERIOD@|20000|g' syn/synthesis.ys > /tmp/synth.ys && \
+#   yosys -s /tmp/synth.ys
 
-# Read design (SystemVerilog mode for local declarations)
 read_verilog -sv ../rtl/fma_fp32_dot3.v
 
-# Elaborate hierarchy
 hierarchy -check -top fma_fp32_dot3
-
-# High-level synthesis passes
-proc                  # Convert processes to netlist
-flatten               # Flatten (or remove this to preserve hierarchy)
-opt_expr              # Optimize expressions
-opt_clean             # Clean up
-check                 # Check for issues
-opt -nodffe -nosdff   # General optimization
-
-# Memory pass (none expected, but keep for safety)
+proc
+flatten
+opt_expr
+opt_clean
+check
+opt -nodffe -nosdff
 memory
 opt -nodffe -nosdff
 
-# Technology mapping to generic cells first
 techmap
 opt -nodffe -nosdff
 
-# Map to SKY130 standard cells
-# Note: requires sky130_fd_sc_hd library to be in search path
-# dfflibmap -liberty sky130_fd_sc_hd__tt_025C_1v80.lib
-# abc -liberty sky130_fd_sc_hd__tt_025C_1v80.lib
-
-# If SKY130 library is not available, use generic mapping for initial analysis
-opt -nodffe -nosdff
+# Map to SKY130 HD standard cells (path substituted by Makefile)
+dfflibmap -liberty @SKY130LIB@
+abc -liberty @SKY130LIB@ -D @CLOCK_PERIOD@
+opt
 clean
 
-# Statistics
-stat
+# Statistics (area in um^2 against the liberty)
+tee -o ../syn/area_report.txt stat -liberty @SKY130LIB@
 
-# Write output
+# Write mapped netlist
 write_verilog -noattr ../syn/fma_fp32_dot3_synth.v
-
-# Report area
-tee -o ../syn/area_report.txt stat

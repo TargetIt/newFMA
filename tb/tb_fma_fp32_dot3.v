@@ -55,6 +55,16 @@ module tb_fma_fp32_dot3;
 
     integer pass_count, fail_count;
 
+    // ---- Model-driven regression (loaded from test_vectors.hex) ----
+    // Format: word0=N, then 8 words per vector {mode,a,b,c,dx,dy,msb,expected}
+    // File is padded to 1+8*64 words; memory matches to avoid readmemh warnings.
+    localparam VEC_CAP = 64;
+    reg [31:0] vmem [0:8*VEC_CAP];
+    reg [31:0] num_vec;
+    integer vi;
+    integer vmode;
+    reg [255:0] vname;
+
     task check_result;
         input [255:0] name;
         input [31:0]  exp_val;
@@ -376,6 +386,35 @@ module tb_fma_fp32_dot3;
         drive_idle();
         repeat (2) @(posedge clk);
         check_result("Dot: dot_p_msb_i[1]=0 test", 32'h3F000000);
+
+        // ============================================================
+        // Model-driven regression (bit-accurate Python reference model)
+        // Loads tb/test_vectors.hex and checks every vector through the DUT.
+        // This closes the loop: the Python model is now the source of truth
+        // and exercises dirty-mantissa / truncation / sticky paths.
+        // ============================================================
+        $display("========================================");
+        $display("  Model-driven regression (test_vectors.hex)");
+        $display("========================================");
+
+        $readmemh("tb/test_vectors.hex", vmem);
+        num_vec = vmem[0];
+        for (vi = 0; vi < num_vec; vi = vi + 1) begin
+            vmode = vmem[1 + 8*vi];
+            mode_i  <= vmode[0];
+            a_i     <= vmem[2 + 8*vi];
+            b_i     <= vmem[3 + 8*vi];
+            c_i     <= vmem[4 + 8*vi];
+            dx_i    <= vmem[5 + 8*vi];
+            dy_i    <= vmem[6 + 8*vi];
+            dot_p_msb_i <= vmem[7 + 8*vi];
+            valid_i <= 1'b1;
+            @(posedge clk);
+            drive_idle();
+            repeat (2) @(posedge clk);
+            $sformat(vname, "VEC[%0d]", vi);
+            check_result(vname, vmem[8 + 8*vi]);
+        end
 
         $display("========================================");
         $display("  Results: %0d pass, %0d fail", pass_count, fail_count);

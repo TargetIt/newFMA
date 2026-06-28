@@ -2,6 +2,8 @@
 // Area-optimized approximate FMA, not bit-exact fused FMA.
 // RN-even rounding, input/output FTZ.
 
+`timescale 1ns / 1ps
+
 module fma_fp32_dot3 (
     input  wire        clk,
     input  wire        rst_n,
