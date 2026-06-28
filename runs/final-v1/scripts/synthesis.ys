@@ -1,0 +1,42 @@
+# Yosys synthesis script for fma_fp32_dot3
+# Target: SKY130 HD typical corner
+
+# Read design (SystemVerilog mode for local declarations)
+read_verilog -sv ../rtl/fma_fp32_dot3.v
+
+# Elaborate hierarchy
+hierarchy -check -top fma_fp32_dot3
+
+# High-level synthesis passes
+proc                  # Convert processes to netlist
+flatten               # Flatten (or remove this to preserve hierarchy)
+opt_expr              # Optimize expressions
+opt_clean             # Clean up
+check                 # Check for issues
+opt -nodffe -nosdff   # General optimization
+
+# Memory pass (none expected, but keep for safety)
+memory
+opt -nodffe -nosdff
+
+# Technology mapping to generic cells first
+techmap
+opt -nodffe -nosdff
+
+# Map to SKY130 standard cells
+# Note: requires sky130_fd_sc_hd library to be in search path
+# dfflibmap -liberty sky130_fd_sc_hd__tt_025C_1v80.lib
+# abc -liberty sky130_fd_sc_hd__tt_025C_1v80.lib
+
+# If SKY130 library is not available, use generic mapping for initial analysis
+opt -nodffe -nosdff
+clean
+
+# Statistics
+stat
+
+# Write output
+write_verilog -noattr ../syn/fma_fp32_dot3_synth.v
+
+# Report area
+tee -o ../syn/area_report.txt stat

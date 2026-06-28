@@ -1,0 +1,10 @@
+timestamp: 2026-06-28T15:08:05Z
+stage: lint
+status: running
+
+--- Icarus Verilog Lint ---
+rtl/fma_fp32_dot3.v:5: warning: timescale for fma_fp32_dot3 inherited from another file.
+tb/tb_fma_fp32_dot3.v:3: ...: The inherited timescale is here.
+
+exit_code: 0
+status: passed
