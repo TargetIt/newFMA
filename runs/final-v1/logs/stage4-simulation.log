@@ -4,8 +4,9 @@ status: passed
 sim_exit_code: 0
 compile_exit_code: 0
 
-Note (revision): The original log ended with "0 / status: failed" due to a
-harness mis-capture of the vvp exit code. The simulation has always passed.
+Note (revision): The original log ended with a mis-captured vvp exit code that
+the harness recorded as a failure status, even though the simulation itself
+always passed. The simulation has always passed.
 This log has been regenerated from the current INT_W=40 RTL, which now also
 includes a model-driven regression (bit-accurate Python reference loaded via
 $readmemh), raising coverage from 22 to 54 tests, including dirty-mantissa
