@@ -1,0 +1,35 @@
+# Yosys synthesis script for fma_fp32_dot3
+# Target: SKY130 HD typical corner (sky130_fd_sc_hd__tt_025C_1v80)
+#
+# This file is a TEMPLATE. @SKY130LIB@ and @CLOCK_PERIOD@ are substituted by
+# the Makefile (`make synth`). To run by hand:
+#   sed -e 's|@SKY130LIB@|/path/to/sky130_fd_sc_hd__tt_025C_1v80.lib|g' \
+#       -e 's|@CLOCK_PERIOD@|20000|g' syn/synthesis.ys > /tmp/synth.ys && \
+#   yosys -s /tmp/synth.ys
+
+read_verilog -sv ../rtl/fma_fp32_dot3.v
+
+hierarchy -check -top fma_fp32_dot3
+proc
+flatten
+opt_expr
+opt_clean
+check
+opt -nodffe -nosdff
+memory
+opt -nodffe -nosdff
+
+techmap
+opt -nodffe -nosdff
+
+# Map to SKY130 HD standard cells (path substituted by Makefile)
+dfflibmap -liberty @SKY130LIB@
+abc -liberty @SKY130LIB@ -D @CLOCK_PERIOD@
+opt
+clean
+
+# Statistics (area in um^2 against the liberty)
+tee -o ../syn/area_report.txt stat -liberty @SKY130LIB@
+
+# Write mapped netlist
+write_verilog -noattr ../syn/fma_fp32_dot3_synth.v

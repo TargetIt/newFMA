@@ -1,0 +1,18 @@
+{
+  "run_id": "harness-v2",
+  "goal_id": "newfma-fp32-dot3",
+  "harness_version": "2.0 (6-stage waterfall)",
+  "status": "passed",
+  "stages": {
+    "spec":    {"status": "passed", "report": "spec/reports/spec_report.md",    "rtm": "requirements/rtm/spec_rtm.json"},
+    "rtl":     {"status": "passed", "report": "rtl/reports/rtl_report.md",      "rtm": "requirements/rtm/rtl_rtm.json"},
+    "verify":  {"status": "passed", "report": "tb/reports/verify_report.md",    "result": "22/22 pass"},
+    "synth":   {"status": "passed", "report": "scripts/reports/synth_report.md", "result": "14,366 cells (-25.5%)"},
+    "timing":  {"status": "passed", "report": "scripts/sta/reports/sta_report.md", "result": "8ns MET zero overhead"},
+    "report":  {"status": "passed", "report": "reports/final.md",               "rtm": "requirements/rtm/global_rtm.json"}
+  },
+  "ppa_results": {
+    "generic_cells": {"reference": 19278, "actual": 14366, "improvement_pct": 25.5},
+    "timing": {"reference_slack_ns": "+4.0~6.6", "meets_8ns": true, "meets_16ns_zero_overhead": true}
+  }
+}
