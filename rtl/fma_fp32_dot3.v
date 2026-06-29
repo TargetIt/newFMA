@@ -27,7 +27,7 @@ module fma_fp32_dot3 (
     localparam BIAS     = 127;
     localparam MANT_FULL = 24;  // mantissa width (1 hidden + 23 fraction)
     localparam MUL_W    = 48;   // 24b x 24b product width
-    localparam INT_W    = 40;   // internal datapath: maximum optimization
+    localparam INT_W    = 28;   // internal datapath: hard minimum (INT_W-27 >= 0)
     localparam AD_PAD   = INT_W - 1 - MANT_FULL;  // addend trailing zeros
     localparam PR_PAD   = 0;    // product truncated to fit
 
@@ -233,7 +233,7 @@ module fma_fp32_dot3 (
 
                     if (prod_exp_adj >= a_exp) begin
                         anchor_exp = prod_exp_adj;
-                        prod_aligned = {1'b0, prod_mant_adj[46:8]};
+                        prod_aligned = {1'b0, prod_mant_adj[46:20]};
                         align_diff = prod_exp_adj - a_exp;
                         addend_aligned = (a_zero || align_diff >= INT_W) ? 0 :
                             log_shr({1'b0, a_mant, {AD_PAD{1'b0}}}, align_diff[5:0]);
@@ -242,7 +242,7 @@ module fma_fp32_dot3 (
                         addend_aligned = {1'b0, a_mant, {AD_PAD{1'b0}}};
                         align_diff = a_exp - prod_exp_adj;
                         prod_aligned = (prod_is_zero || align_diff >= INT_W) ? 0 :
-                            log_shr({1'b0, prod_mant_adj[46:8]}, align_diff[5:0]);
+                            log_shr({1'b0, prod_mant_adj[46:20]}, align_diff[5:0]);
                     end
 
                     // Special case detection
@@ -387,9 +387,9 @@ module fma_fp32_dot3 (
                             if (dx_is_zero || dx_shift >= INT_W)
                                 dx_aligned = 0;
                             else
-                                dx_aligned = log_shr({1'b0, prod_dx_adj[46:8]}, dx_shift[5:0]);
+                                dx_aligned = log_shr({1'b0, prod_dx_adj[46:20]}, dx_shift[5:0]);
                         end else
-                            dx_aligned = {1'b0, prod_dx_adj[46:8]};
+                            dx_aligned = {1'b0, prod_dx_adj[46:20]};
 
                         // Align dy product
                         if (anchor_exp >= prod_exp_adj) begin
@@ -398,9 +398,9 @@ module fma_fp32_dot3 (
                             if (dy_is_zero || dy_shift >= INT_W)
                                 dy_aligned = 0;
                             else
-                                dy_aligned = log_shr({1'b0, prod_dy_adj[46:8]}, dy_shift[5:0]);
+                                dy_aligned = log_shr({1'b0, prod_dy_adj[46:20]}, dy_shift[5:0]);
                         end else
-                            dy_aligned = {1'b0, prod_dy_adj[46:8]};
+                            dy_aligned = {1'b0, prod_dy_adj[46:20]};
 
                         s2_exp   <= anchor_exp;
                         s2_term1 <= ps_aligned;
@@ -474,48 +474,36 @@ module fma_fp32_dot3 (
                 result_sign = sum_raw[INT_W];
                 sum_abs = result_sign ? (~sum_raw[INT_W-1:0] + 1'b1) : sum_raw[INT_W-1:0];
 
-                // LOD: cascaded priority encoder (INT_W=40, range [39:0])
+                // LOD: cascaded priority encoder (INT_W=28, range [27:0])
                 lod = 0;
-                if      (sum_abs[39]) lod = 0;
-                else if (sum_abs[38]) lod = 1;
-                else if (sum_abs[37]) lod = 2;
-                else if (sum_abs[36]) lod = 3;
-                else if (sum_abs[35]) lod = 4;
-                else if (sum_abs[34]) lod = 5;
-                else if (sum_abs[33]) lod = 6;
-                else if (sum_abs[32]) lod = 7;
-                else if (sum_abs[31]) lod = 8;
-                else if (sum_abs[30]) lod = 9;
-                else if (sum_abs[29]) lod = 10;
-                else if (sum_abs[28]) lod = 11;
-                else if (sum_abs[27]) lod = 12;
-                else if (sum_abs[26]) lod = 13;
-                else if (sum_abs[25]) lod = 14;
-                else if (sum_abs[24]) lod = 15;
-                else if (sum_abs[23]) lod = 16;
-                else if (sum_abs[22]) lod = 17;
-                else if (sum_abs[21]) lod = 18;
-                else if (sum_abs[20]) lod = 19;
-                else if (sum_abs[19]) lod = 20;
-                else if (sum_abs[18]) lod = 21;
-                else if (sum_abs[17]) lod = 22;
-                else if (sum_abs[16]) lod = 23;
-                else if (sum_abs[15]) lod = 24;
-                else if (sum_abs[14]) lod = 25;
-                else if (sum_abs[13]) lod = 26;
-                else if (sum_abs[12]) lod = 27;
-                else if (sum_abs[11]) lod = 28;
-                else if (sum_abs[10]) lod = 29;
-                else if (sum_abs[ 9]) lod = 30;
-                else if (sum_abs[ 8]) lod = 31;
-                else if (sum_abs[ 7]) lod = 32;
-                else if (sum_abs[ 6]) lod = 33;
-                else if (sum_abs[ 5]) lod = 34;
-                else if (sum_abs[ 4]) lod = 35;
-                else if (sum_abs[ 3]) lod = 36;
-                else if (sum_abs[ 2]) lod = 37;
-                else if (sum_abs[ 1]) lod = 38;
-                else if (sum_abs[ 0]) lod = 39;
+                if      (sum_abs[27]) lod = 0;
+                else if (sum_abs[26]) lod = 1;
+                else if (sum_abs[25]) lod = 2;
+                else if (sum_abs[24]) lod = 3;
+                else if (sum_abs[23]) lod = 4;
+                else if (sum_abs[22]) lod = 5;
+                else if (sum_abs[21]) lod = 6;
+                else if (sum_abs[20]) lod = 7;
+                else if (sum_abs[19]) lod = 8;
+                else if (sum_abs[18]) lod = 9;
+                else if (sum_abs[17]) lod = 10;
+                else if (sum_abs[16]) lod = 11;
+                else if (sum_abs[15]) lod = 12;
+                else if (sum_abs[14]) lod = 13;
+                else if (sum_abs[13]) lod = 14;
+                else if (sum_abs[12]) lod = 15;
+                else if (sum_abs[11]) lod = 16;
+                else if (sum_abs[10]) lod = 17;
+                else if (sum_abs[ 9]) lod = 18;
+                else if (sum_abs[ 8]) lod = 19;
+                else if (sum_abs[ 7]) lod = 20;
+                else if (sum_abs[ 6]) lod = 21;
+                else if (sum_abs[ 5]) lod = 22;
+                else if (sum_abs[ 4]) lod = 23;
+                else if (sum_abs[ 3]) lod = 24;
+                else if (sum_abs[ 2]) lod = 25;
+                else if (sum_abs[ 1]) lod = 26;
+                else if (sum_abs[ 0]) lod = 27;
 
                 s3_result_sign <= result_sign;
                 s3_mant        <= sum_abs;
