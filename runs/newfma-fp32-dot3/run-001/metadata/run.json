@@ -1,0 +1,17 @@
+{
+  "run_id": "run-001",
+  "goal_id": "newfma-fp32-dot3",
+  "harness_version": "2.0 (6-stage waterfall, post-audit)",
+  "status": "conditional_pass",
+  "stages": {
+    "spec":    {"status":"passed","report":"spec/reports/spec_report.md"},
+    "rtl":     {"status":"passed","report":"rtl/reports/rtl_report.md"},
+    "verify":  {"status":"passed","report":"tb/reports/verify_report.md","result":"22/22 pass"},
+    "synth":   {"status":"passed","report":"scripts/reports/synth_report.md","result":"7560 cells, 5.21E+04"},
+    "timing":  {"status":"passed","report":"scripts/sta/reports/sta_report.md","result":"8ns MET zero overhead"},
+    "report":  {"status":"conditional_pass","report":"reports/signoff.md","result":"7/10 passed, 3 partial"}
+  },
+  "signoff": {"passed":7,"partial":3,"failed":0,"partial_items":["CR-006","CR-007","CR-008"]},
+  "r tl_ref": "run-001 design.sv INT_W=28",
+  "repro_entrypoint": "See stage logs for exact commands"
+}

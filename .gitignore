@@ -7,3 +7,5 @@ syn/*_synth.v
 runs/harness-v2/logs/stage4-synth-*.log
 *.out
 runs/harness-v2/logs/stage4-synth-*.log
+*.out
+runs/*/logs/stage4-synth*.log
