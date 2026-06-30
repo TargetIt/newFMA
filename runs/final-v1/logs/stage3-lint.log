@@ -1,7 +1,0 @@
---- iverilog version ---
-Icarus Verilog version 14.0 (devel) (s20260301-220-g78750c51d-dirty)
-
---- lint command ---
-iverilog -g2012 -Wall -o /dev/null tb/tb_fma_fp32_dot3.v rtl/fma_fp32_dot3.v
-exit_code: 0
-lint_result: PASS (0 warnings)
