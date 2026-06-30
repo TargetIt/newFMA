@@ -43,22 +43,36 @@
 | 10.0ns | 100 MHz | 7,560 | 0% | MET |
 | 8.0ns | 125 MHz | 7,560 | 0% | MET |
 
-## Global RTM
+## Requirements Traceability Matrix (CR-by-CR Audit)
 
-| CR | SPEC | RTL | VERIFY | SYNTH | TIMING |
-|----|------|-----|--------|-------|--------|
-| CR-001 (FMA/Dot modes) | ✓ | FEAT-001 | 12 tests | - | - |
-| CR-002 (Ports) | ✓ | FEAT-002 | - | - | - |
-| CR-003 (FP semantics) | ✓ | FEAT-003,004 | 6 tests | - | - |
-| CR-004 (Special values) | ✓ | FEAT-005a,b | 5 tests | - | - |
-| CR-005 (Dot constraints) | ✓ | FEAT-006a,b | 1 test | - | - |
-| CR-006 (Pipeline) | ✓ | FEAT-007a,b | - | - | - |
-| CR-007 (Synth tool/clock) | ✓ | FEAT-008 | - | PASS | - |
-| CR-008 (Ref PPA) | ✓ | - | - | baseline | baseline |
-| CR-009 (Verification) | ✓ | - | 22/22 | - | - |
-| CR-010 (Optimization) | ✓ | FEAT-009a-e | - | -25.5%/-16.4% | >60% |
+| CR | 需求 | SPEC | RTL | VERIFY | SYNTH | TIMING | 状态 | 备注 |
+|----|------|------|-----|--------|-------|--------|------|------|
+| CR-001 | 顶层功能 FMA+Dot | 25条目 | FEAT-001 | TEST-001~022 | - | - | **✓** | 全功能覆盖 |
+| CR-002 | 端口定义 12 ports | 5条目 | FEAT-002 | 隐式(22 tests) | - | - | **✓** | 端口正确性由所有测试验证 |
+| CR-003 | 浮点语义 FTZ/RN | 4条目 | FEAT-003,004 | 6 tests | - | - | **✓** | FTZ in/out, RN-even verified |
+| CR-004 | 特殊值优先级 | 5条目 | FEAT-005a,b | 5 tests | - | - | **✓** | NaN, Inf, Inf×0, Inf抵消 |
+| CR-005 | Dot 约束 Q8.4/MSB | 2条目 | FEAT-006a,b | 6 tests | - | - | **✓** | Dx/Dy边界, dot_p_msb_i组合 |
+| CR-006 | 流水线 3-stage | 3条目 | FEAT-007a,b | △ | - | - | **△** | RTL结构正确，缺独立延迟测试 |
+| CR-007 | 综合/STA 工具 | 2条目 | FEAT-008 | - | PASS | ABC替代 | **△** | ABC替代OpenSTA(不可用); flatten代替hierarchy |
+| CR-008 | 参考 PPA 基线 | 1条目 | - | - | -25.5%/-16.4% | >60% | **△** | Generic✓ SKY130△, Hold未测 |
+| CR-009 | 验证要求 | 1条目 | - | 22/22 (6类) | - | - | **✓** | 全部类别覆盖 |
+| CR-010 | 优化目标 ≥20% | 2条目 | FEAT-009a-e | - | -25.5% | >60% | **✓** | 面积-25.5%(generic), 时序>60% |
 
-**All 10 CR items covered. No orphan requirements.**
+### 达成性总结
+
+| 状态 | 数量 | 说明 |
+|------|------|------|
+| **✓ 完全达成** | 7 | CR-001,002,003,004,005,009,010 |
+| **△ 部分达成** | 3 | CR-006(缺延迟测试), CR-007(工具替代), CR-008(指标选择) |
+| **✗ 未达成** | 0 | - |
+
+### 遗留项
+
+| CR | 遗留 | 影响 | 优先级 |
+|----|------|------|--------|
+| CR-006 | 无独立 valid_i→valid_o 3-cycle 延迟测试 | 流水线延迟未被显式验证，但所有功能测试正确 | 低 |
+| CR-007 | STA 用 ABC 替代 OpenSTA；flatten vs hierarchy | 综合结果可比性受限 | 中 |
+| CR-008 | Hold slack 未测量；SKY130 改善(-16.4%)弱于 generic(-25.5%) | 20% 目标用 generic metric 达成，SKY130 metric 差 3.6% | 中 |
 
 ## Optimizations Applied
 
