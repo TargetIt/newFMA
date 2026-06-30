@@ -335,7 +335,7 @@ module tb_fma_fp32_dot3;
         drive_dot(32'h3F800000, 32'h40000000, 32'h40400000, 12'h010, 12'h010, 2'b11);
         @(posedge clk);
         drive_idle();
-        repeat (2) @(posedge clk);
+        repeat (3) @(posedge clk);
         check_result("Dot: 1+2*1+3*1=6", 32'h40C00000);
 
         // Dx=0: Ps=1.0, Px=2.0, Py=3.0, Dx=0, Dy=1.0
@@ -344,7 +344,7 @@ module tb_fma_fp32_dot3;
         drive_dot(32'h3F800000, 32'h40000000, 32'h40400000, 12'h000, 12'h010, 2'b11);
         @(posedge clk);
         drive_idle();
-        repeat (2) @(posedge clk);
+        repeat (3) @(posedge clk);
         check_result("Dot: dx=0 → 1+0+3=4", 32'h40800000);
 
         // Dx max (11'h7FF = max unsigned with dx[11]=0)
@@ -354,7 +354,7 @@ module tb_fma_fp32_dot3;
         drive_dot(32'h00000000, 32'h3F800000, 32'h00000000, 12'h7FF, 12'h000, 2'b10);
         @(posedge clk);
         drive_idle();
-        repeat (2) @(posedge clk);
+        repeat (3) @(posedge clk);
         check_result("Dot: 0+1*127.94+0", 32'h42FFE000);
 
         // Dx min non-zero (=1, i.e. 1/16 = 0.0625)
@@ -364,7 +364,7 @@ module tb_fma_fp32_dot3;
         drive_dot(32'h00000000, 32'h40000000, 32'h00000000, 12'h001, 12'h000, 2'b10);
         @(posedge clk);
         drive_idle();
-        repeat (2) @(posedge clk);
+        repeat (3) @(posedge clk);
         check_result("Dot: 2*0.0625=0.125", 32'h3E000000);
 
         // Px/Py different signs
@@ -374,7 +374,7 @@ module tb_fma_fp32_dot3;
         drive_dot(32'h00000000, 32'h40000000, 32'hC0000000, 12'h010, 12'h010, 2'b11);
         @(posedge clk);
         drive_idle();
-        repeat (2) @(posedge clk);
+        repeat (3) @(posedge clk);
         check_result("Dot: 2*1+-2*1=0", 32'h00000000);
 
         // dot_p_msb_i combinations: test msb=0 for subnormal-like mantissa
@@ -384,7 +384,7 @@ module tb_fma_fp32_dot3;
         drive_dot(32'h00000000, 32'h3F000000, 32'h00000000, 12'h010, 12'h000, 2'b10);
         @(posedge clk);
         drive_idle();
-        repeat (2) @(posedge clk);
+        repeat (3) @(posedge clk);
         check_result("Dot: dot_p_msb_i[1]=0 test", 32'h3F000000);
 
         // ============================================================
