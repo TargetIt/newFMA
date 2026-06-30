@@ -1,0 +1,19 @@
+{
+  "stage": "synth",
+  "checklist": {
+    "synthesizable_constructs": {"status": "pass", "tool": "yosys synth -top"},
+    "latch_check": {"status": "pass", "result": "0 inferred latches"},
+    "multi_driver_check": {"status": "pass"},
+    "combinational_loop_check": {"status": "pass"},
+    "area_target": {"reference_cells": 19278, "actual_cells": 14366, "improvement_pct": 25.5, "status": "pass"},
+    "sky130_mapping": {"cells": 7560, "area": "5.21E+04", "flow": "synth -top + abc -D 20000", "status": "pass"}
+  },
+  "ppa": {
+    "INT_W": 28,
+    "fma_multiplier": "24x12",
+    "dot_multiplier": "24x11 x2",
+    "shifters": "logarithmic (6-stage)",
+    "flow": "synth -top (replaces manual proc;opt;techmap;abc)"
+  },
+  "log": "logs/stage4-synth-sky130.log"
+}
