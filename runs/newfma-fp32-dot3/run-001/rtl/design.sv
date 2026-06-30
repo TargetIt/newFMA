@@ -31,9 +31,10 @@ module fma_fp32_dot3 (
     localparam AD_PAD   = INT_W - 1 - MANT_FULL;  // addend trailing zeros
     localparam PR_PAD   = 0;    // product truncated to fit
 
-    // Shared multiplier — exactly ONE * instance for Yosys
-    reg  [23:0] mult_a, mult_b;
-    wire [47:0] shared_product;
+    // Shared multiplier — exactly ONE * instance for Yosys (24×16)
+    reg  [23:0] mult_a;
+    reg  [15:0] mult_b;
+    wire [39:0] shared_product;
     assign shared_product = mult_a * mult_b;
 
     // Area-efficient logarithmic right shifter (replaces barrel shifter)
@@ -193,7 +194,7 @@ module fma_fp32_dot3 (
                     {a_nan, a_inf, a_zero, a_sign, a_exp, a_mant} = unpack_ftz(a_i);
                     {b_nan, b_inf, b_zero, b_sign, b_exp, b_mant} = unpack_ftz(b_i);
                     {c_nan, c_inf, c_zero, c_sign, c_exp, c_mant} = unpack_ftz(c_i);
-                    mult_a = b_mant; mult_b = c_mant;
+                    mult_a = b_mant; mult_b = c_mant[23:8];
 
                     // Inline special resolution
                     if (a_nan || b_nan || c_nan)
@@ -209,8 +210,8 @@ module fma_fp32_dot3 (
                     end else
                         special_result = 32'h00000000;
 
-                    // Use shared multiplier
-                    prod_mant = shared_product;
+                    // Use shared multiplier (24×16, pad to 48 bits)
+                    prod_mant = {shared_product, 8'd0};
                     prod_is_zero = b_zero || c_zero;
                     prod_exp = prod_is_zero ? 8'd0 : (b_exp + c_exp - BIAS);
 
@@ -275,8 +276,8 @@ module fma_fp32_dot3 (
                     {ps_nan, ps_inf, ps_zero, ps_sign, ps_exp, ps_mant} = unpack_ftz(a_i);
                     {px_nan, px_inf, px_zero, px_sign, px_exp, px_mant} = unpack_dot(b_i, dot_p_msb_i[1]);
                     {py_nan, py_inf, py_zero, py_sign, py_exp, py_mant} = unpack_dot(c_i, dot_p_msb_i[0]);
-                    if (!dot_phase) begin mult_a = px_mant; mult_b = {12'd0, dx_i[10:0]}; end
-                    else        begin mult_a = dot_held_py_mant; mult_b = {12'd0, dot_held_dy[10:0]}; end
+                    if (!dot_phase) begin mult_a = px_mant; mult_b = {5'd0, dx_i[10:0]}; end
+                    else        begin mult_a = dot_held_py_mant; mult_b = {5'd0, dot_held_dy[10:0]}; end
 
                     if (!dot_phase) begin
                         // === PHASE 0: compute Px*Dx, hold ===
