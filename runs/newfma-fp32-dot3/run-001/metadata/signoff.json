@@ -1,9 +1,9 @@
 {
-  "date": "2026-06-30 13:21 UTC",
-  "total": 10,
+  "date": "2026-06-30 13:22 UTC",
+  "total": 9,
   "passed": 6,
   "partial": 2,
-  "failed": 2,
+  "failed": 1,
   "overall": "❌ FAIL — {failed_count} requirement(s) not met",
   "details": [
     {
@@ -59,12 +59,6 @@
       "title": "优化目标 vs 参考",
       "status": "failed",
       "gap": "面积 +28.6%, cells +39.8% vs 参考。时序达标但面积未达标。需进一步优化或重新设计架构。"
-    },
-    {
-      "cr_id": "CR-010",
-      "title": "CR-010",
-      "status": "unknown",
-      "gap": ""
     }
   ]
 }

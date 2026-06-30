@@ -1,10 +1,10 @@
 # Project Sign-Off Report
 
-**Date:** 2026-06-30 13:21 UTC
+**Date:** 2026-06-30 13:22 UTC
 
 **Overall:** ❌ FAIL — {failed_count} requirement(s) not met
 
-**Verdict:** 6/10 passed, 2 partial, 2 failed
+**Verdict:** 6/9 passed, 2 partial, 1 failed
 **Project:** run-001
 
 ---
@@ -14,9 +14,9 @@
 ### CR-001: 顶层功能 FMA+Dot
 
 **需求:** 顶层功能
-> 模块名：fma_fp32_dot3。支持两种模式（mode_i 选择）：
-> - mode_i=0: Y = A + B * C (FMA 模式)
-> - mode_i=1: Y = Ps + Px*Dx + Py*Dy (D...
+模块名：fma_fp32_dot3。支持两种模式（mode_i 选择）：
+- mode_i=0: Y = A + B * C (FMA 模式)
+- mode_i=1: Y = Ps + Px*Dx + Py*Dy (Dot 模式)
 
 | Stage | Coverage |
 |-------|----------|
@@ -53,9 +53,10 @@
 ### CR-003: 浮点语义 FTZ/RN-even
 
 **需求:** 浮点语义
-- 输入 FTZ (Flush-To-Zero): 有限且 exp==0 的输入视为零
+- 输入 FTZ: 有限且 exp==0 的输入视为零
 - 输出 FTZ: 输出 subnormal 结果统一 flush-to-zero
-- 舍入模式: Round-to-Nearest-Even...
+- 舍入模式: Round-to-Nearest-Even (RN-even)
+- 精度定...
 
 | Stage | Coverage |
 |-------|----------|
@@ -132,10 +133,9 @@
 ### CR-007: 综合/STA 工具
 
 **需求:** 综合与 STA 目标
-- RTL: fma_fp32_dot3.v（单文件）
-- 综合器: Yosys
+- 综合器: Yosys（与参考相同的工具链）
 - 工艺库: SKY130 HD typical corner (sky130_fd_sc_hd__tt_025C_1v80.lib)
-...
+- STA: OpenSTA 或等...
 
 | Stage | Coverage |
 |-------|----------|
@@ -152,13 +152,8 @@
 
 ### CR-008: 验证要求
 
-**需求:** 参考 PPA 基线
-| 指标 | 值 |
-|------|-----|
-| Hierarchy 总面积 | ~40,512 µm² |
-| Flatten 总面积 | ~39,660 µm² |
-| 总 cell 数 | ~5,406 |
-...
+**需求:** 验证要求
+必须覆盖的测试类别：FMA 同号、FMA 异号、Sticky/Round、Zero/FTZ、Special(NaN/Inf)、Dot(dx/dy边界/dot_p_msb_i组合/Px/Py异号)
 
 | Stage | Coverage |
 |-------|----------|
@@ -174,8 +169,9 @@
 
 ### CR-009: 优化目标 vs 参考
 
-**需求:** 验证要求
-必须覆盖的测试类别：FMA 同号、FMA 异号、Sticky/Round、Zero/FTZ、Special(NaN/Inf)、Dot(dx/dy边界/dot_p_msb_i组合/Px/Py异号)
+**需求:** 优化目标
+- 面积比参考（40,512 µm², 5,406 cells）好 ≥20% → 目标 < 32,410 µm², < 4,325 cells
+- 时序比参考（slack +4.0~6.6ns @20ns）好 ≥20% → 目标 ...
 
 | Stage | Coverage |
 |-------|----------|
@@ -187,25 +183,6 @@
 
 **判定: ❌ FAIL** — 未达成
 **原因:** 面积 +28.6%, cells +39.8% vs 参考。时序达标但面积未达标。需进一步优化或重新设计架构。
-
----
-
-### CR-010: CR-010
-
-**需求:** 优化目标
-- 面积比参考好 ≥20%
-- 时序比参考好 ≥20%
-
-| Stage | Coverage |
-|-------|----------|
-| spec | — |
-| rtl | — |
-| verify | — |
-| synth | — |
-| timing | — |
-
-**判定: ❌ FAIL** — 未达成
-**原因:** 
 
 ---
 
