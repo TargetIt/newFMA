@@ -31,6 +31,11 @@ module fma_fp32_dot3 (
     localparam AD_PAD   = INT_W - 1 - MANT_FULL;  // addend trailing zeros
     localparam PR_PAD   = 0;    // product truncated to fit
 
+    // Shared multiplier — exactly ONE * instance for Yosys
+    reg  [23:0] mult_a, mult_b;
+    wire [47:0] shared_product;
+    assign shared_product = mult_a * mult_b;
+
     // Area-efficient logarithmic right shifter (replaces barrel shifter)
     function [INT_W-1:0] log_shr;
         input [INT_W-1:0] data;
@@ -76,6 +81,15 @@ module fma_fp32_dot3 (
     reg  [INT_W-1:0] s2_term3;        // third term (dot mode only)
     reg  [1:0]  s2_sign1, s2_sign2, s2_sign3; // sign: 0=zero,1=pos,2=neg. s2_sign3!=0 => 3-term
     reg  [31:0] s2_special_result;    // pre-computed special result
+    reg         dot_phase;             // Dot 2-phase control
+    reg  [47:0] dot_held_prod;  reg  [7:0] dot_held_exp;
+    reg         dot_held_sign, dot_held_dx_zero;
+    reg  [23:0] dot_held_ps_mant, dot_held_py_mant;
+    reg  [7:0]  dot_held_ps_exp, dot_held_py_exp;
+    reg         dot_held_ps_sign, dot_held_ps_zero;
+    reg         dot_held_py_sign, dot_held_py_zero;
+    reg  [11:0] dot_held_dy;
+
 
     // Special encoding: 0=normal, 1=qNaN, 2=Inf(+), 3=Inf(-), 4=zero
     function [2:0] encode_special;
@@ -170,6 +184,7 @@ module fma_fp32_dot3 (
         end
     endfunction
 
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s2_valid    <= 1'b0;
@@ -182,11 +197,12 @@ module fma_fp32_dot3 (
             s2_sign2    <= 2'd0;
             s2_sign3    <= 2'd0;
             s2_special_result <= 32'd0;
+            dot_phase   <= 1'b0;
         end else begin
-            s2_valid <= valid_i;
+            s2_valid <= valid_i || dot_phase;
 
-            if (valid_i) begin
-                if (!mode_i) begin
+            if (valid_i || dot_phase) begin
+                if (!mode_i && !dot_phase) begin
                     // ============================================
                     // FMA Mode: Y = A + B * C
                     // ============================================
@@ -209,6 +225,7 @@ module fma_fp32_dot3 (
                     {a_nan, a_inf, a_zero, a_sign, a_exp, a_mant} = unpack_ftz(a_i);
                     {b_nan, b_inf, b_zero, b_sign, b_exp, b_mant} = unpack_ftz(b_i);
                     {c_nan, c_inf, c_zero, c_sign, c_exp, c_mant} = unpack_ftz(c_i);
+                    mult_a = b_mant; mult_b = c_mant;
 
                     special_result = resolve_special(
                         a_nan, a_inf, a_sign,
@@ -217,9 +234,8 @@ module fma_fp32_dot3 (
                         b_zero, c_zero, a_zero, 1'b0
                     );
 
-                    // Compute all values (blocking) before branching
-                    // Area-optimized 24×12 multiplier (truncate 12 LSBs, shift to align)
-                    prod_mant = (b_mant * c_mant[23:12]) << 12;
+                    // Use shared multiplier
+                    prod_mant = shared_product;
                     prod_is_zero = b_zero || c_zero;
                     prod_exp = prod_is_zero ? 8'd0 : (b_exp + c_exp - BIAS);
 
@@ -245,32 +261,27 @@ module fma_fp32_dot3 (
                             log_shr({1'b0, prod_mant_adj[46:20]}, align_diff[5:0]);
                     end
 
-                    // Special case detection
                     if (a_nan || b_nan || c_nan || a_inf || b_inf || c_inf ||
                         (b_inf && c_zero) || (b_zero && c_inf)) begin
-                        s2_special <= encode_special(a_nan || b_nan || c_nan,
-                                                     a_inf || b_inf || c_inf, 1'b0);
+                        s2_special <= encode_special(a_nan||b_nan||c_nan, a_inf||b_inf||c_inf, 1'b0);
                         s2_special_result <= special_result;
                         s2_sign1 <= 2'd0; s2_sign2 <= 2'd0; s2_sign3 <= 2'd0;
                     end else begin
                         s2_special <= 3'd0;
                         s2_special_result <= 32'd0;
                         s2_sign1 <= (a_sign && ~a_zero) ? 2'd2 : (a_zero ? 2'd0 : 2'd1);
-                        s2_sign2 <= (b_zero || c_zero) ? 2'd0 :
-                                    ((b_sign ^ c_sign) ? 2'd2 : 2'd1);
+                        s2_sign2 <= (b_zero || c_zero) ? 2'd0 : ((b_sign ^ c_sign) ? 2'd2 : 2'd1);
                         s2_sign3 <= 2'd0;
                     end
 
                     s2_exp   <= anchor_exp;
-                    s2_term1 <= (a_nan || b_nan || c_nan || a_inf || b_inf || c_inf ||
-                                 (b_inf && c_zero) || (b_zero && c_inf)) ? 0 : addend_aligned;
-                    s2_term2 <= (a_nan || b_nan || c_nan || a_inf || b_inf || c_inf ||
-                                 (b_inf && c_zero) || (b_zero && c_inf)) ? 0 : prod_aligned;
+                    s2_term1 <= (a_nan||b_nan||c_nan||a_inf||b_inf||c_inf||(b_inf&&c_zero)||(b_zero&&c_inf)) ? 0 : addend_aligned;
+                    s2_term2 <= (a_nan||b_nan||c_nan||a_inf||b_inf||c_inf||(b_inf&&c_zero)||(b_zero&&c_inf)) ? 0 : prod_aligned;
                     s2_term3 <= 0;
 
                 end else begin
                     // ============================================
-                    // Dot Mode: Y = Ps + Px*Dx + Py*Dy
+                    // Dot Mode: Y = Ps + Px*Dx + Py*Dy (2-phase)
                     // ============================================
                     reg ps_nan, ps_inf, ps_zero, ps_sign;
                     reg px_nan, px_inf, px_zero, px_sign;
@@ -279,143 +290,84 @@ module fma_fp32_dot3 (
                     reg [23:0] ps_mant, px_mant, py_mant;
                     reg [47:0] prod_dx, prod_dy;
                     reg [46:0] prod_dx_adj, prod_dy_adj;
-                    reg px_sign_bit, py_sign_bit;
                     reg [7:0] prod_exp, prod_exp_adj;
-                    reg [5:0] msb_pos_dx, msb_pos_dy;
+                    reg [5:0] msb_pos;
                     integer j;
-                    reg signed [8:0] align_diff;
                     reg [INT_W-1:0] ps_aligned, dx_aligned, dy_aligned;
-                    reg ps_is_zero;
                     reg dx_is_zero, dy_is_zero;
                     reg [31:0] special_result;
                     reg [7:0] anchor_exp;
-                    reg any_nan_d, px_infzero, py_infzero, inf_cancel;
-                    reg dot_special_flag;
 
                     {ps_nan, ps_inf, ps_zero, ps_sign, ps_exp, ps_mant} = unpack_ftz(a_i);
                     {px_nan, px_inf, px_zero, px_sign, px_exp, px_mant} = unpack_dot(b_i, dot_p_msb_i[1]);
                     {py_nan, py_inf, py_zero, py_sign, py_exp, py_mant} = unpack_dot(c_i, dot_p_msb_i[0]);
-                    any_nan_d = ps_nan || px_nan || py_nan;
-                    px_infzero = px_inf && (dx_i[10:0] == 11'd0);
-                    py_infzero = py_inf && (dy_i[10:0] == 11'd0);
-                    inf_cancel = ps_inf && px_inf && py_inf &&
-                                 (ps_sign != px_sign || ps_sign != py_sign);
-                    dot_special_flag = any_nan_d || ps_inf || px_inf || py_inf ||
-                                       px_infzero || py_infzero;
+                    if (!dot_phase) begin mult_a = px_mant; mult_b = {12'd0, dx_i[10:0]}; end
+                    else        begin mult_a = dot_held_py_mant; mult_b = {12'd0, dot_held_dy[10:0]}; end
 
-                    if (any_nan_d)
-                        special_result = 32'h7FC00000;
-                    else if (px_infzero || py_infzero || inf_cancel)
-                        special_result = 32'h7FC00000;
-                    else if (ps_inf)
-                        special_result = {ps_sign, 8'hFF, 23'd0};
-                    else if (px_inf)
-                        special_result = {px_sign, 8'hFF, 23'd0};
-                    else if (py_inf)
-                        special_result = {py_sign, 8'hFF, 23'd0};
-                    else
-                        special_result = 32'd0;
-
-                    if (dot_special_flag) begin
-                        s2_special <= any_nan_d ? 3'd1 :
-                                      (ps_inf ? (ps_sign ? 3'd3 : 3'd2) :
-                                       px_inf ? (px_sign ? 3'd3 : 3'd2) :
-                                       py_inf ? (py_sign ? 3'd3 : 3'd2) : 3'd1);
-                        s2_special_result <= special_result;
-                        s2_term1 <= 0; s2_term2 <= 0; s2_term3 <= 0;
+                    if (!dot_phase) begin
+                        // === PHASE 0: compute Px*Dx, hold ===
+                        if (ps_nan || px_nan || py_nan || ps_inf || px_inf || py_inf || (px_inf && (dx_i[10:0] == 11'd0))) begin
+                            s2_special <= (ps_nan||px_nan||py_nan) ? 3'd1 : ps_inf ? (ps_sign?3'd3:3'd2) : px_inf ? (px_sign?3'd3:3'd2) : py_inf ? (py_sign?3'd3:3'd2) : 3'd1;
+                            s2_special_result <= (ps_nan||px_nan||py_nan) ? 32'h7FC00000 : ps_inf ? {ps_sign,8'hFF,23'd0} : px_inf ? {px_sign,8'hFF,23'd0} : py_inf ? {py_sign,8'hFF,23'd0} : 32'h7FC00000;
+                            s2_term1 <= 0; s2_term2 <= 0; s2_term3 <= 0;
+                            dot_phase <= 1'b0;
+                        end else begin
+                            prod_dx = shared_product;
+                            dx_is_zero = px_zero || (dx_i[10:0] == 11'd0);
+                            msb_pos = 0;
+                            if (!dx_is_zero) begin for (j=46;j>=0;j=j-1) if (prod_dx[j] && msb_pos==0) msb_pos=j[5:0]; end
+                            prod_dx_adj = dx_is_zero ? 47'd0 : (prod_dx[46:0] << (6'd46 - msb_pos));
+                            prod_exp = dx_is_zero ? 8'd0 : (px_exp + msb_pos - 8'd27);
+                            dot_held_prod    <= {1'b0, prod_dx_adj};
+                            dot_held_exp     <= prod_exp;
+                            dot_held_sign    <= px_sign;
+                            dot_held_dx_zero <= dx_is_zero;
+                            dot_held_ps_mant <= ps_mant; dot_held_ps_exp <= ps_exp;
+                            dot_held_ps_sign <= ps_sign; dot_held_ps_zero <= ps_zero;
+                            dot_held_py_mant <= py_mant; dot_held_py_exp <= py_exp;
+                            dot_held_py_sign <= py_sign; dot_held_py_zero <= py_zero;
+                            dot_held_dy      <= dy_i;
+                            dot_phase <= 1'b1;
+                            s2_valid  <= 1'b0;
+                        end
                     end else begin
-                        s2_special <= 3'd0;
-                        s2_special_result <= 32'd0;
-
-                        // Compute raw products (24×11 area-efficient multiply)
-                        prod_dx = px_mant * dx_i[10:0];
-                        prod_dy = py_mant * dy_i[10:0];
-                        px_sign_bit = px_sign;
-                        py_sign_bit = py_sign;
-
-                        dx_is_zero = px_zero || (dx_i[10:0] == 11'd0);
-                        dy_is_zero = py_zero || (dy_i[10:0] == 11'd0);
-
-                        // Normalize dot products: find MSB, shift to bit 46
-                        msb_pos_dx = 0;
-                        if (!dx_is_zero) begin
-                            for (j = 46; j >= 0; j = j - 1) begin
-                                if (prod_dx[j] && (msb_pos_dx == 0))
-                                    msb_pos_dx = j[5:0];
-                            end
-                        end
-                        msb_pos_dy = 0;
-                        if (!dy_is_zero) begin
-                            for (j = 46; j >= 0; j = j - 1) begin
-                                if (prod_dy[j] && (msb_pos_dy == 0))
-                                    msb_pos_dy = j[5:0];
-                            end
-                        end
-
-                        // Shift products to normalize (MSB → bit 46), full width
-                        prod_dx_adj = dx_is_zero ? 47'd0 :
-                            (prod_dx[46:0] << (6'd46 - msb_pos_dx));
-                        prod_dy_adj = dy_is_zero ? 47'd0 :
-                            (prod_dy[46:0] << (6'd46 - msb_pos_dy));
-
-                        // Product exponents (with normalization)
-                        prod_exp = dx_is_zero ? 8'd0 :
-                            (px_exp + msb_pos_dx - 8'd27);
-                        prod_exp_adj = dy_is_zero ? 8'd0 :
-                            (py_exp + msb_pos_dy - 8'd27);
-
-                        // Anchor exponent = max(prod_dx_exp, prod_dy_exp, ps_exp)
-                        anchor_exp = ps_exp;
-                        if (prod_exp > anchor_exp) anchor_exp = prod_exp;
+                        // === PHASE 1: compute Py*Dy, align all 3 ===
+                        dot_phase <= 1'b0;
+                        prod_dy = shared_product;
+                        dy_is_zero = dot_held_py_zero || (dot_held_dy[10:0] == 11'd0);
+                        msb_pos = 0;
+                        if (!dy_is_zero) begin for (j=46;j>=0;j=j-1) if (prod_dy[j] && msb_pos==0) msb_pos=j[5:0]; end
+                        prod_dy_adj = dy_is_zero ? 47'd0 : (prod_dy[46:0] << (6'd46 - msb_pos));
+                        prod_exp_adj = dy_is_zero ? 8'd0 : (dot_held_py_exp + msb_pos - 8'd27);
+                        anchor_exp = dot_held_ps_exp;
+                        if (dot_held_exp > anchor_exp) anchor_exp = dot_held_exp;
                         if (prod_exp_adj > anchor_exp) anchor_exp = prod_exp_adj;
-
-                        // Align Ps
-                        if (anchor_exp >= ps_exp) begin
-                            reg [7:0] ps_shift;
-                            ps_shift = anchor_exp - ps_exp;
-                            if (ps_zero || ps_shift >= INT_W)
-                                ps_aligned = 0;
-                            else
-                                ps_aligned = log_shr({1'b0, ps_mant, {AD_PAD{1'b0}}}, ps_shift[5:0]);
-                        end else
-                            ps_aligned = 0;
-
-                        // Align dx product
-                        if (anchor_exp >= prod_exp) begin
-                            reg [7:0] dx_shift;
-                            dx_shift = anchor_exp - prod_exp;
-                            if (dx_is_zero || dx_shift >= INT_W)
-                                dx_aligned = 0;
-                            else
-                                dx_aligned = log_shr({1'b0, prod_dx_adj[46:20]}, dx_shift[5:0]);
-                        end else
-                            dx_aligned = {1'b0, prod_dx_adj[46:20]};
-
-                        // Align dy product
+                        if (anchor_exp >= dot_held_ps_exp) begin
+                            reg [7:0] sh; sh = anchor_exp - dot_held_ps_exp;
+                            ps_aligned = (dot_held_ps_zero || sh >= INT_W) ? 0 : log_shr({1'b0, dot_held_ps_mant, {AD_PAD{1'b0}}}, sh[5:0]);
+                        end else ps_aligned = 0;
+                        if (anchor_exp >= dot_held_exp) begin
+                            reg [7:0] sh; sh = anchor_exp - dot_held_exp;
+                            dx_aligned = (dot_held_dx_zero || sh >= INT_W) ? 0 : log_shr({1'b0, dot_held_prod[46:20]}, sh[5:0]);
+                        end else dx_aligned = 0;
                         if (anchor_exp >= prod_exp_adj) begin
-                            reg [7:0] dy_shift;
-                            dy_shift = anchor_exp - prod_exp_adj;
-                            if (dy_is_zero || dy_shift >= INT_W)
-                                dy_aligned = 0;
-                            else
-                                dy_aligned = log_shr({1'b0, prod_dy_adj[46:20]}, dy_shift[5:0]);
-                        end else
-                            dy_aligned = {1'b0, prod_dy_adj[46:20]};
-
+                            reg [7:0] sh; sh = anchor_exp - prod_exp_adj;
+                            dy_aligned = (dy_is_zero || sh >= INT_W) ? 0 : log_shr({1'b0, prod_dy_adj[46:20]}, sh[5:0]);
+                        end else dy_aligned = {1'b0, prod_dy_adj[46:20]};
+                        s2_special <= 3'd0; s2_special_result <= 32'd0;
                         s2_exp   <= anchor_exp;
                         s2_term1 <= ps_aligned;
                         s2_term2 <= dx_aligned;
                         s2_term3 <= dy_aligned;
-                        s2_sign1 <= ps_zero ? 2'd0 : (ps_sign ? 2'd2 : 2'd1);
-                        s2_sign2 <= dx_is_zero ? 2'd0 : (px_sign_bit ? 2'd2 : 2'd1);
-                        s2_sign3 <= dy_is_zero ? 2'd0 : (py_sign_bit ? 2'd2 : 2'd1);
+                        s2_sign1 <= dot_held_ps_zero ? 2'd0 : (dot_held_ps_sign ? 2'd2 : 2'd1);
+                        s2_sign2 <= dot_held_dx_zero ? 2'd0 : (dot_held_sign ? 2'd2 : 2'd1);
+                        s2_sign3 <= dy_is_zero ? 2'd0 : (dot_held_py_sign ? 2'd2 : 2'd1);
                     end
                 end
             end
         end
     end
 
-    // ============================================================
     // Stage 2: CPA Sum, Absolute Value, LOD, Sticky
     // ============================================================
     reg         s3_valid;
