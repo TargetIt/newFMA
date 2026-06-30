@@ -149,40 +149,7 @@ module fma_fp32_dot3 (
         end
     endfunction
 
-    // Priority special case resolution
-    function [31:0] resolve_special;
-        input a_nan, a_inf, a_sign, b_nan, b_inf, b_sign, c_nan, c_inf, c_sign;
-        input b_zero, c_zero, a_zero;
-        input is_dot;
-        reg any_nan, a_inf_bc_inf_opp, inf_times_zero, remaining_inf;
-        reg res_sign;
-        begin
-            any_nan = a_nan || b_nan || c_nan;
-            // Inf * 0 check
-            inf_times_zero = (b_inf && c_zero) || (b_zero && c_inf);
-            // A Inf + opposite sign B*C Inf
-            a_inf_bc_inf_opp = a_inf && b_inf && c_inf && (a_sign != (b_sign ^ c_sign));
-            // Remaining Inf
-            remaining_inf = a_inf || b_inf || c_inf;
 
-            // Determine result sign for Inf cases
-            if (a_inf) res_sign = a_sign;
-            else if (b_inf && c_inf) res_sign = b_sign ^ c_sign;
-            else if (b_inf) res_sign = b_sign;
-            else res_sign = c_sign;
-
-            if (any_nan)
-                resolve_special = 32'h7FC00000;  // quiet NaN
-            else if (inf_times_zero || a_inf_bc_inf_opp)
-                resolve_special = 32'h7FC00000;  // qNaN
-            else if (remaining_inf)
-                resolve_special = {res_sign, 8'hFF, 23'd0};  // signed Inf
-            else if (a_zero && ((b_inf && c_zero) || (b_zero && c_inf)))
-                resolve_special = 32'h7FC00000;
-            else
-                resolve_special = 32'h00000000;  // normal path marker
-        end
-    endfunction
 
 
     always @(posedge clk or negedge rst_n) begin
@@ -227,12 +194,19 @@ module fma_fp32_dot3 (
                     {c_nan, c_inf, c_zero, c_sign, c_exp, c_mant} = unpack_ftz(c_i);
                     mult_a = b_mant; mult_b = c_mant;
 
-                    special_result = resolve_special(
-                        a_nan, a_inf, a_sign,
-                        b_nan, b_inf, b_sign,
-                        c_nan, c_inf, c_sign,
-                        b_zero, c_zero, a_zero, 1'b0
-                    );
+                    // Inline special resolution
+                    if (a_nan || b_nan || c_nan)
+                        special_result = 32'h7FC00000;
+                    else if ((b_inf && c_zero) || (b_zero && c_inf) ||
+                             (a_inf && b_inf && c_inf && (a_sign != (b_sign ^ c_sign))))
+                        special_result = 32'h7FC00000;
+                    else if (a_inf || b_inf || c_inf) begin
+                        if (a_inf) special_result = {a_sign, 8'hFF, 23'd0};
+                        else if (b_inf && c_inf) special_result = {(b_sign ^ c_sign), 8'hFF, 23'd0};
+                        else if (b_inf) special_result = {b_sign, 8'hFF, 23'd0};
+                        else special_result = {c_sign, 8'hFF, 23'd0};
+                    end else
+                        special_result = 32'h00000000;
 
                     // Use shared multiplier
                     prod_mant = shared_product;
@@ -292,7 +266,6 @@ module fma_fp32_dot3 (
                     reg [46:0] prod_dx_adj, prod_dy_adj;
                     reg [7:0] prod_exp, prod_exp_adj;
                     reg [5:0] msb_pos;
-                    integer j;
                     reg [INT_W-1:0] ps_aligned, dx_aligned, dy_aligned;
                     reg dx_is_zero, dy_is_zero;
                     reg [31:0] special_result;
@@ -315,7 +288,56 @@ module fma_fp32_dot3 (
                             prod_dx = shared_product;
                             dx_is_zero = px_zero || (dx_i[10:0] == 11'd0);
                             msb_pos = 0;
-                            if (!dx_is_zero) begin for (j=46;j>=0;j=j-1) if (prod_dx[j] && msb_pos==0) msb_pos=j[5:0]; end
+                            if (!dx_is_zero) begin
+    msb_pos = 0;
+                                if      (prod_dx[46]) msb_pos = 0;
+                                else if (prod_dx[45]) msb_pos = 1;
+                                else if (prod_dx[44]) msb_pos = 2;
+                                else if (prod_dx[43]) msb_pos = 3;
+                                else if (prod_dx[42]) msb_pos = 4;
+                                else if (prod_dx[41]) msb_pos = 5;
+                                else if (prod_dx[40]) msb_pos = 6;
+                                else if (prod_dx[39]) msb_pos = 7;
+                                else if (prod_dx[38]) msb_pos = 8;
+                                else if (prod_dx[37]) msb_pos = 9;
+                                else if (prod_dx[36]) msb_pos = 10;
+                                else if (prod_dx[35]) msb_pos = 11;
+                                else if (prod_dx[34]) msb_pos = 12;
+                                else if (prod_dx[33]) msb_pos = 13;
+                                else if (prod_dx[32]) msb_pos = 14;
+                                else if (prod_dx[31]) msb_pos = 15;
+                                else if (prod_dx[30]) msb_pos = 16;
+                                else if (prod_dx[29]) msb_pos = 17;
+                                else if (prod_dx[28]) msb_pos = 18;
+                                else if (prod_dx[27]) msb_pos = 19;
+                                else if (prod_dx[26]) msb_pos = 20;
+                                else if (prod_dx[25]) msb_pos = 21;
+                                else if (prod_dx[24]) msb_pos = 22;
+                                else if (prod_dx[23]) msb_pos = 23;
+                                else if (prod_dx[22]) msb_pos = 24;
+                                else if (prod_dx[21]) msb_pos = 25;
+                                else if (prod_dx[20]) msb_pos = 26;
+                                else if (prod_dx[19]) msb_pos = 27;
+                                else if (prod_dx[18]) msb_pos = 28;
+                                else if (prod_dx[17]) msb_pos = 29;
+                                else if (prod_dx[16]) msb_pos = 30;
+                                else if (prod_dx[15]) msb_pos = 31;
+                                else if (prod_dx[14]) msb_pos = 32;
+                                else if (prod_dx[13]) msb_pos = 33;
+                                else if (prod_dx[12]) msb_pos = 34;
+                                else if (prod_dx[11]) msb_pos = 35;
+                                else if (prod_dx[10]) msb_pos = 36;
+                                else if (prod_dx[ 9]) msb_pos = 37;
+                                else if (prod_dx[ 8]) msb_pos = 38;
+                                else if (prod_dx[ 7]) msb_pos = 39;
+                                else if (prod_dx[ 6]) msb_pos = 40;
+                                else if (prod_dx[ 5]) msb_pos = 41;
+                                else if (prod_dx[ 4]) msb_pos = 42;
+                                else if (prod_dx[ 3]) msb_pos = 43;
+                                else if (prod_dx[ 2]) msb_pos = 44;
+                                else if (prod_dx[ 1]) msb_pos = 45;
+                                else if (prod_dx[ 0]) msb_pos = 46;
+                            end
                             prod_dx_adj = dx_is_zero ? 47'd0 : (prod_dx[46:0] << (6'd46 - msb_pos));
                             prod_exp = dx_is_zero ? 8'd0 : (px_exp + msb_pos - 8'd27);
                             dot_held_prod    <= {1'b0, prod_dx_adj};
@@ -336,7 +358,56 @@ module fma_fp32_dot3 (
                         prod_dy = shared_product;
                         dy_is_zero = dot_held_py_zero || (dot_held_dy[10:0] == 11'd0);
                         msb_pos = 0;
-                        if (!dy_is_zero) begin for (j=46;j>=0;j=j-1) if (prod_dy[j] && msb_pos==0) msb_pos=j[5:0]; end
+                        if (!dy_is_zero) begin
+    msb_pos = 0;
+                                if      (prod_dy[46]) msb_pos = 0;
+                                else if (prod_dy[45]) msb_pos = 1;
+                                else if (prod_dy[44]) msb_pos = 2;
+                                else if (prod_dy[43]) msb_pos = 3;
+                                else if (prod_dy[42]) msb_pos = 4;
+                                else if (prod_dy[41]) msb_pos = 5;
+                                else if (prod_dy[40]) msb_pos = 6;
+                                else if (prod_dy[39]) msb_pos = 7;
+                                else if (prod_dy[38]) msb_pos = 8;
+                                else if (prod_dy[37]) msb_pos = 9;
+                                else if (prod_dy[36]) msb_pos = 10;
+                                else if (prod_dy[35]) msb_pos = 11;
+                                else if (prod_dy[34]) msb_pos = 12;
+                                else if (prod_dy[33]) msb_pos = 13;
+                                else if (prod_dy[32]) msb_pos = 14;
+                                else if (prod_dy[31]) msb_pos = 15;
+                                else if (prod_dy[30]) msb_pos = 16;
+                                else if (prod_dy[29]) msb_pos = 17;
+                                else if (prod_dy[28]) msb_pos = 18;
+                                else if (prod_dy[27]) msb_pos = 19;
+                                else if (prod_dy[26]) msb_pos = 20;
+                                else if (prod_dy[25]) msb_pos = 21;
+                                else if (prod_dy[24]) msb_pos = 22;
+                                else if (prod_dy[23]) msb_pos = 23;
+                                else if (prod_dy[22]) msb_pos = 24;
+                                else if (prod_dy[21]) msb_pos = 25;
+                                else if (prod_dy[20]) msb_pos = 26;
+                                else if (prod_dy[19]) msb_pos = 27;
+                                else if (prod_dy[18]) msb_pos = 28;
+                                else if (prod_dy[17]) msb_pos = 29;
+                                else if (prod_dy[16]) msb_pos = 30;
+                                else if (prod_dy[15]) msb_pos = 31;
+                                else if (prod_dy[14]) msb_pos = 32;
+                                else if (prod_dy[13]) msb_pos = 33;
+                                else if (prod_dy[12]) msb_pos = 34;
+                                else if (prod_dy[11]) msb_pos = 35;
+                                else if (prod_dy[10]) msb_pos = 36;
+                                else if (prod_dy[ 9]) msb_pos = 37;
+                                else if (prod_dy[ 8]) msb_pos = 38;
+                                else if (prod_dy[ 7]) msb_pos = 39;
+                                else if (prod_dy[ 6]) msb_pos = 40;
+                                else if (prod_dy[ 5]) msb_pos = 41;
+                                else if (prod_dy[ 4]) msb_pos = 42;
+                                else if (prod_dy[ 3]) msb_pos = 43;
+                                else if (prod_dy[ 2]) msb_pos = 44;
+                                else if (prod_dy[ 1]) msb_pos = 45;
+                                else if (prod_dy[ 0]) msb_pos = 46;
+                        end
                         prod_dy_adj = dy_is_zero ? 47'd0 : (prod_dy[46:0] << (6'd46 - msb_pos));
                         prod_exp_adj = dy_is_zero ? 8'd0 : (dot_held_py_exp + msb_pos - 8'd27);
                         anchor_exp = dot_held_ps_exp;
