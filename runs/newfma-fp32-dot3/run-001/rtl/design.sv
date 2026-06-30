@@ -82,12 +82,13 @@ module fma_fp32_dot3 (
     reg  [1:0]  s2_sign1, s2_sign2, s2_sign3; // sign: 0=zero,1=pos,2=neg. s2_sign3!=0 => 3-term
     reg  [31:0] s2_special_result;    // pre-computed special result
     reg         dot_phase;             // Dot 2-phase control
-    reg  [47:0] dot_held_prod;  reg  [7:0] dot_held_exp;
+    reg  [26:0] dot_held_prod;         // Px*Dx bits [46:20] only (27 bits)
+    reg  [7:0]  dot_held_exp;
     reg         dot_held_sign, dot_held_dx_zero;
     reg  [23:0] dot_held_ps_mant, dot_held_py_mant;
     reg  [7:0]  dot_held_ps_exp, dot_held_py_exp;
-    reg         dot_held_ps_sign, dot_held_ps_zero;
-    reg         dot_held_py_sign, dot_held_py_zero;
+    reg         dot_held_ps_sign;
+    reg         dot_held_py_sign;
     reg  [11:0] dot_held_dy;
 
 
@@ -340,14 +341,14 @@ module fma_fp32_dot3 (
                             end
                             prod_dx_adj = dx_is_zero ? 47'd0 : (prod_dx[46:0] << (6'd46 - msb_pos));
                             prod_exp = dx_is_zero ? 8'd0 : (px_exp + msb_pos - 8'd27);
-                            dot_held_prod    <= {1'b0, prod_dx_adj};
+                            dot_held_prod    <= prod_dx_adj[46:20];
                             dot_held_exp     <= prod_exp;
                             dot_held_sign    <= px_sign;
                             dot_held_dx_zero <= dx_is_zero;
                             dot_held_ps_mant <= ps_mant; dot_held_ps_exp <= ps_exp;
-                            dot_held_ps_sign <= ps_sign; dot_held_ps_zero <= ps_zero;
+                            dot_held_ps_sign <= ps_sign;
                             dot_held_py_mant <= py_mant; dot_held_py_exp <= py_exp;
-                            dot_held_py_sign <= py_sign; dot_held_py_zero <= py_zero;
+                            dot_held_py_sign <= py_sign;
                             dot_held_dy      <= dy_i;
                             dot_phase <= 1'b1;
                             s2_valid  <= 1'b0;
@@ -356,7 +357,7 @@ module fma_fp32_dot3 (
                         // === PHASE 1: compute Py*Dy, align all 3 ===
                         dot_phase <= 1'b0;
                         prod_dy = shared_product;
-                        dy_is_zero = dot_held_py_zero || (dot_held_dy[10:0] == 11'd0);
+                        dy_is_zero = (dot_held_py_mant == 0) || (dot_held_dy[10:0] == 11'd0);
                         msb_pos = 0;
                         if (!dy_is_zero) begin
     msb_pos = 0;
@@ -415,11 +416,11 @@ module fma_fp32_dot3 (
                         if (prod_exp_adj > anchor_exp) anchor_exp = prod_exp_adj;
                         if (anchor_exp >= dot_held_ps_exp) begin
                             reg [7:0] sh; sh = anchor_exp - dot_held_ps_exp;
-                            ps_aligned = (dot_held_ps_zero || sh >= INT_W) ? 0 : log_shr({1'b0, dot_held_ps_mant, {AD_PAD{1'b0}}}, sh[5:0]);
+                            ps_aligned = ((dot_held_ps_mant == 0) || sh >= INT_W) ? 0 : log_shr({1'b0, dot_held_ps_mant, {AD_PAD{1'b0}}}, sh[5:0]);
                         end else ps_aligned = 0;
                         if (anchor_exp >= dot_held_exp) begin
                             reg [7:0] sh; sh = anchor_exp - dot_held_exp;
-                            dx_aligned = (dot_held_dx_zero || sh >= INT_W) ? 0 : log_shr({1'b0, dot_held_prod[46:20]}, sh[5:0]);
+                            dx_aligned = (dot_held_dx_zero || sh >= INT_W) ? 0 : log_shr({1'b0, dot_held_prod}, sh[5:0]);
                         end else dx_aligned = 0;
                         if (anchor_exp >= prod_exp_adj) begin
                             reg [7:0] sh; sh = anchor_exp - prod_exp_adj;
@@ -430,7 +431,7 @@ module fma_fp32_dot3 (
                         s2_term1 <= ps_aligned;
                         s2_term2 <= dx_aligned;
                         s2_term3 <= dy_aligned;
-                        s2_sign1 <= dot_held_ps_zero ? 2'd0 : (dot_held_ps_sign ? 2'd2 : 2'd1);
+                        s2_sign1 <= (dot_held_ps_mant == 0) ? 2'd0 : (dot_held_ps_sign ? 2'd2 : 2'd1);
                         s2_sign2 <= dot_held_dx_zero ? 2'd0 : (dot_held_sign ? 2'd2 : 2'd1);
                         s2_sign3 <= dy_is_zero ? 2'd0 : (dot_held_py_sign ? 2'd2 : 2'd1);
                     end
