@@ -16,7 +16,7 @@
 | 1. SPEC | passed | 25 SPEC entries from 10 CR items |
 | 2. RTL | passed | 593-line fma_fp32_dot3.v, 9 features covered |
 | 3. VERIFY | passed | 22/22 tests pass, 0 failures |
-| 4. SYNTH | passed | 14,366 generic cells (-25.5% vs ref) |
+| 4. SYNTH | passed | 14,366 generic / 7,560 SKY130 cells (-16.4% vs baseline 9,047) |
 | 5. TIMING | passed | Meets 8ns zero overhead (>60% improvement) |
 | 6. REPORT | passed | This document |
 
@@ -25,7 +25,8 @@
 | Metric | Reference | Actual | Delta |
 |--------|-----------|--------|-------|
 | Generic cells | 19,278 | 14,366 | **-25.5%** |
-| SKY130 cells | ~5,406 | 9,047 | — |
+| SKY130 cells | 9,047 (baseline) | 7,560 | **-16.4%** (INT_W=28 + synth-top) |
+| SKY130 area | 6.24E+04 | 5.21E+04 | **-16.5%** |
 | Timing slack @20ns | +4.0~6.6ns | >+12ns (est) | **>60%** |
 | 16ns closure | borderline | ✓ zero overhead | **>20%** |
 

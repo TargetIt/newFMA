@@ -6,11 +6,11 @@
 
 | Period | Frequency | SKY130 Cells | Overhead | Verdict |
 |--------|-----------|-------------|----------|---------|
-| 20.0 ns | 50 MHz | 9,047 | baseline | - |
-| 16.0 ns | 62.5 MHz | 9,047 | 0% | **MET** |
-| 12.0 ns | 83 MHz | 9,047 | 0% | MET |
-| 10.0 ns | 100 MHz | 9,047 | 0% | MET |
-| 8.0 ns | 125 MHz | 9,047 | 0% | MET |
+| 20.0 ns | 50 MHz | 7,560 | baseline | - |
+| 16.0 ns | 62.5 MHz | 7,560 | 0% | **MET** |
+| 12.0 ns | 83 MHz | 7,560 | 0% | MET |
+| 10.0 ns | 100 MHz | 7,560 | 0% | MET |
+| 8.0 ns | 125 MHz | 7,560 | 0% | MET |
 
 ## Timing Checklist
 

@@ -7,8 +7,8 @@
 | Metric | Reference | Actual | Improvement |
 |--------|-----------|--------|-------------|
 | Generic cells | 19,278 | **14,366** | **-25.5%** |
-| SKY130 cells (20ns) | ~5,406 | **9,047** | (diff methodology) |
-| SKY130 area | ~40,512 µm² | **6.24E+04** | - |
+| SKY130 cells (20ns) | ~5,406 | **7,560** | INT_W=28 + synth -top |
+| SKY130 area | ~40,512 µm² | **5.21E+04** | - |
 
 > Note: Generic-to-SKY130 cell ratio differs from reference methodology. The generic cell count improvement of 25.5% exceeds the 20% target.
 

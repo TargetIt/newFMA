@@ -13,6 +13,8 @@
   },
   "ppa_results": {
     "generic_cells": {"reference": 19278, "actual": 14366, "improvement_pct": 25.5},
+    "sky130_cells": {"baseline": 9047, "actual": 7560, "improvement_pct": 16.4, "INT_W": 28, "flow": "synth -top"},
+    "sky130_area": {"baseline": "6.24E+04", "actual": "5.21E+04", "improvement_pct": 16.5},
     "timing": {"reference_slack_ns": "+4.0~6.6", "meets_8ns": true, "meets_16ns_zero_overhead": true}
   }
 }
