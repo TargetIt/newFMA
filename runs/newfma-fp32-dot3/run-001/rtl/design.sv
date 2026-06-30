@@ -31,12 +31,6 @@ module fma_fp32_dot3 (
     localparam AD_PAD   = INT_W - 1 - MANT_FULL;  // addend trailing zeros
     localparam PR_PAD   = 0;    // product truncated to fit
 
-    // Shared multiplier — exactly ONE * instance for Yosys (24×16)
-    reg  [23:0] mult_a;
-    reg  [15:0] mult_b;
-    wire [39:0] shared_product;
-    assign shared_product = mult_a * mult_b;
-
     // Area-efficient logarithmic right shifter (replaces barrel shifter)
     function [INT_W-1:0] log_shr;
         input [INT_W-1:0] data;
@@ -82,16 +76,6 @@ module fma_fp32_dot3 (
     reg  [INT_W-1:0] s2_term3;        // third term (dot mode only)
     reg  [1:0]  s2_sign1, s2_sign2, s2_sign3; // sign: 0=zero,1=pos,2=neg. s2_sign3!=0 => 3-term
     reg  [31:0] s2_special_result;    // pre-computed special result
-    reg         dot_phase;             // Dot 2-phase control
-    reg  [26:0] dot_held_prod;         // Px*Dx bits [46:20] only (27 bits)
-    reg  [7:0]  dot_held_exp;
-    reg         dot_held_sign, dot_held_dx_zero;
-    reg  [23:0] dot_held_ps_mant, dot_held_py_mant;
-    reg  [7:0]  dot_held_ps_exp, dot_held_py_exp;
-    reg         dot_held_ps_sign;
-    reg         dot_held_py_sign;
-    reg  [11:0] dot_held_dy;
-
 
     // Special encoding: 0=normal, 1=qNaN, 2=Inf(+), 3=Inf(-), 4=zero
     function [2:0] encode_special;
@@ -151,8 +135,40 @@ module fma_fp32_dot3 (
         end
     endfunction
 
+    // Priority special case resolution
+    function [31:0] resolve_special;
+        input a_nan, a_inf, a_sign, b_nan, b_inf, b_sign, c_nan, c_inf, c_sign;
+        input b_zero, c_zero, a_zero;
+        input is_dot;
+        reg any_nan, a_inf_bc_inf_opp, inf_times_zero, remaining_inf;
+        reg res_sign;
+        begin
+            any_nan = a_nan || b_nan || c_nan;
+            // Inf * 0 check
+            inf_times_zero = (b_inf && c_zero) || (b_zero && c_inf);
+            // A Inf + opposite sign B*C Inf
+            a_inf_bc_inf_opp = a_inf && b_inf && c_inf && (a_sign != (b_sign ^ c_sign));
+            // Remaining Inf
+            remaining_inf = a_inf || b_inf || c_inf;
 
+            // Determine result sign for Inf cases
+            if (a_inf) res_sign = a_sign;
+            else if (b_inf && c_inf) res_sign = b_sign ^ c_sign;
+            else if (b_inf) res_sign = b_sign;
+            else res_sign = c_sign;
 
+            if (any_nan)
+                resolve_special = 32'h7FC00000;  // quiet NaN
+            else if (inf_times_zero || a_inf_bc_inf_opp)
+                resolve_special = 32'h7FC00000;  // qNaN
+            else if (remaining_inf)
+                resolve_special = {res_sign, 8'hFF, 23'd0};  // signed Inf
+            else if (a_zero && ((b_inf && c_zero) || (b_zero && c_inf)))
+                resolve_special = 32'h7FC00000;
+            else
+                resolve_special = 32'h00000000;  // normal path marker
+        end
+    endfunction
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -166,12 +182,11 @@ module fma_fp32_dot3 (
             s2_sign2    <= 2'd0;
             s2_sign3    <= 2'd0;
             s2_special_result <= 32'd0;
-            dot_phase   <= 1'b0;
         end else begin
-            s2_valid <= valid_i || dot_phase;
+            s2_valid <= valid_i;
 
-            if (valid_i || dot_phase) begin
-                if (!mode_i && !dot_phase) begin
+            if (valid_i) begin
+                if (!mode_i) begin
                     // ============================================
                     // FMA Mode: Y = A + B * C
                     // ============================================
@@ -194,24 +209,17 @@ module fma_fp32_dot3 (
                     {a_nan, a_inf, a_zero, a_sign, a_exp, a_mant} = unpack_ftz(a_i);
                     {b_nan, b_inf, b_zero, b_sign, b_exp, b_mant} = unpack_ftz(b_i);
                     {c_nan, c_inf, c_zero, c_sign, c_exp, c_mant} = unpack_ftz(c_i);
-                    mult_a = b_mant; mult_b = c_mant[23:8];
 
-                    // Inline special resolution
-                    if (a_nan || b_nan || c_nan)
-                        special_result = 32'h7FC00000;
-                    else if ((b_inf && c_zero) || (b_zero && c_inf) ||
-                             (a_inf && b_inf && c_inf && (a_sign != (b_sign ^ c_sign))))
-                        special_result = 32'h7FC00000;
-                    else if (a_inf || b_inf || c_inf) begin
-                        if (a_inf) special_result = {a_sign, 8'hFF, 23'd0};
-                        else if (b_inf && c_inf) special_result = {(b_sign ^ c_sign), 8'hFF, 23'd0};
-                        else if (b_inf) special_result = {b_sign, 8'hFF, 23'd0};
-                        else special_result = {c_sign, 8'hFF, 23'd0};
-                    end else
-                        special_result = 32'h00000000;
+                    special_result = resolve_special(
+                        a_nan, a_inf, a_sign,
+                        b_nan, b_inf, b_sign,
+                        c_nan, c_inf, c_sign,
+                        b_zero, c_zero, a_zero, 1'b0
+                    );
 
-                    // Use shared multiplier (24×16, pad to 48 bits)
-                    prod_mant = {shared_product, 8'd0};
+                    // Compute all values (blocking) before branching
+                    // Area-optimized 24×12 multiplier (truncate 12 LSBs, shift to align)
+                    prod_mant = (b_mant * c_mant[23:12]) << 12;
                     prod_is_zero = b_zero || c_zero;
                     prod_exp = prod_is_zero ? 8'd0 : (b_exp + c_exp - BIAS);
 
@@ -237,27 +245,32 @@ module fma_fp32_dot3 (
                             log_shr({1'b0, prod_mant_adj[46:20]}, align_diff[5:0]);
                     end
 
+                    // Special case detection
                     if (a_nan || b_nan || c_nan || a_inf || b_inf || c_inf ||
                         (b_inf && c_zero) || (b_zero && c_inf)) begin
-                        s2_special <= encode_special(a_nan||b_nan||c_nan, a_inf||b_inf||c_inf, 1'b0);
+                        s2_special <= encode_special(a_nan || b_nan || c_nan,
+                                                     a_inf || b_inf || c_inf, 1'b0);
                         s2_special_result <= special_result;
                         s2_sign1 <= 2'd0; s2_sign2 <= 2'd0; s2_sign3 <= 2'd0;
                     end else begin
                         s2_special <= 3'd0;
                         s2_special_result <= 32'd0;
                         s2_sign1 <= (a_sign && ~a_zero) ? 2'd2 : (a_zero ? 2'd0 : 2'd1);
-                        s2_sign2 <= (b_zero || c_zero) ? 2'd0 : ((b_sign ^ c_sign) ? 2'd2 : 2'd1);
+                        s2_sign2 <= (b_zero || c_zero) ? 2'd0 :
+                                    ((b_sign ^ c_sign) ? 2'd2 : 2'd1);
                         s2_sign3 <= 2'd0;
                     end
 
                     s2_exp   <= anchor_exp;
-                    s2_term1 <= (a_nan||b_nan||c_nan||a_inf||b_inf||c_inf||(b_inf&&c_zero)||(b_zero&&c_inf)) ? 0 : addend_aligned;
-                    s2_term2 <= (a_nan||b_nan||c_nan||a_inf||b_inf||c_inf||(b_inf&&c_zero)||(b_zero&&c_inf)) ? 0 : prod_aligned;
+                    s2_term1 <= (a_nan || b_nan || c_nan || a_inf || b_inf || c_inf ||
+                                 (b_inf && c_zero) || (b_zero && c_inf)) ? 0 : addend_aligned;
+                    s2_term2 <= (a_nan || b_nan || c_nan || a_inf || b_inf || c_inf ||
+                                 (b_inf && c_zero) || (b_zero && c_inf)) ? 0 : prod_aligned;
                     s2_term3 <= 0;
 
                 end else begin
                     // ============================================
-                    // Dot Mode: Y = Ps + Px*Dx + Py*Dy (2-phase)
+                    // Dot Mode: Y = Ps + Px*Dx + Py*Dy
                     // ============================================
                     reg ps_nan, ps_inf, ps_zero, ps_sign;
                     reg px_nan, px_inf, px_zero, px_sign;
@@ -266,181 +279,143 @@ module fma_fp32_dot3 (
                     reg [23:0] ps_mant, px_mant, py_mant;
                     reg [47:0] prod_dx, prod_dy;
                     reg [46:0] prod_dx_adj, prod_dy_adj;
+                    reg px_sign_bit, py_sign_bit;
                     reg [7:0] prod_exp, prod_exp_adj;
-                    reg [5:0] msb_pos;
+                    reg [5:0] msb_pos_dx, msb_pos_dy;
+                    integer j;
+                    reg signed [8:0] align_diff;
                     reg [INT_W-1:0] ps_aligned, dx_aligned, dy_aligned;
+                    reg ps_is_zero;
                     reg dx_is_zero, dy_is_zero;
                     reg [31:0] special_result;
                     reg [7:0] anchor_exp;
+                    reg any_nan_d, px_infzero, py_infzero, inf_cancel;
+                    reg dot_special_flag;
 
                     {ps_nan, ps_inf, ps_zero, ps_sign, ps_exp, ps_mant} = unpack_ftz(a_i);
                     {px_nan, px_inf, px_zero, px_sign, px_exp, px_mant} = unpack_dot(b_i, dot_p_msb_i[1]);
                     {py_nan, py_inf, py_zero, py_sign, py_exp, py_mant} = unpack_dot(c_i, dot_p_msb_i[0]);
-                    if (!dot_phase) begin mult_a = px_mant; mult_b = {5'd0, dx_i[10:0]}; end
-                    else        begin mult_a = dot_held_py_mant; mult_b = {5'd0, dot_held_dy[10:0]}; end
+                    any_nan_d = ps_nan || px_nan || py_nan;
+                    px_infzero = px_inf && (dx_i[10:0] == 11'd0);
+                    py_infzero = py_inf && (dy_i[10:0] == 11'd0);
+                    inf_cancel = ps_inf && px_inf && py_inf &&
+                                 (ps_sign != px_sign || ps_sign != py_sign);
+                    dot_special_flag = any_nan_d || ps_inf || px_inf || py_inf ||
+                                       px_infzero || py_infzero;
 
-                    if (!dot_phase) begin
-                        // === PHASE 0: compute Px*Dx, hold ===
-                        if (ps_nan || px_nan || py_nan || ps_inf || px_inf || py_inf || (px_inf && (dx_i[10:0] == 11'd0))) begin
-                            s2_special <= (ps_nan||px_nan||py_nan) ? 3'd1 : ps_inf ? (ps_sign?3'd3:3'd2) : px_inf ? (px_sign?3'd3:3'd2) : py_inf ? (py_sign?3'd3:3'd2) : 3'd1;
-                            s2_special_result <= (ps_nan||px_nan||py_nan) ? 32'h7FC00000 : ps_inf ? {ps_sign,8'hFF,23'd0} : px_inf ? {px_sign,8'hFF,23'd0} : py_inf ? {py_sign,8'hFF,23'd0} : 32'h7FC00000;
-                            s2_term1 <= 0; s2_term2 <= 0; s2_term3 <= 0;
-                            dot_phase <= 1'b0;
-                        end else begin
-                            prod_dx = shared_product;
-                            dx_is_zero = px_zero || (dx_i[10:0] == 11'd0);
-                            msb_pos = 0;
-                            if (!dx_is_zero) begin
-    msb_pos = 0;
-                                if      (prod_dx[46]) msb_pos = 0;
-                                else if (prod_dx[45]) msb_pos = 1;
-                                else if (prod_dx[44]) msb_pos = 2;
-                                else if (prod_dx[43]) msb_pos = 3;
-                                else if (prod_dx[42]) msb_pos = 4;
-                                else if (prod_dx[41]) msb_pos = 5;
-                                else if (prod_dx[40]) msb_pos = 6;
-                                else if (prod_dx[39]) msb_pos = 7;
-                                else if (prod_dx[38]) msb_pos = 8;
-                                else if (prod_dx[37]) msb_pos = 9;
-                                else if (prod_dx[36]) msb_pos = 10;
-                                else if (prod_dx[35]) msb_pos = 11;
-                                else if (prod_dx[34]) msb_pos = 12;
-                                else if (prod_dx[33]) msb_pos = 13;
-                                else if (prod_dx[32]) msb_pos = 14;
-                                else if (prod_dx[31]) msb_pos = 15;
-                                else if (prod_dx[30]) msb_pos = 16;
-                                else if (prod_dx[29]) msb_pos = 17;
-                                else if (prod_dx[28]) msb_pos = 18;
-                                else if (prod_dx[27]) msb_pos = 19;
-                                else if (prod_dx[26]) msb_pos = 20;
-                                else if (prod_dx[25]) msb_pos = 21;
-                                else if (prod_dx[24]) msb_pos = 22;
-                                else if (prod_dx[23]) msb_pos = 23;
-                                else if (prod_dx[22]) msb_pos = 24;
-                                else if (prod_dx[21]) msb_pos = 25;
-                                else if (prod_dx[20]) msb_pos = 26;
-                                else if (prod_dx[19]) msb_pos = 27;
-                                else if (prod_dx[18]) msb_pos = 28;
-                                else if (prod_dx[17]) msb_pos = 29;
-                                else if (prod_dx[16]) msb_pos = 30;
-                                else if (prod_dx[15]) msb_pos = 31;
-                                else if (prod_dx[14]) msb_pos = 32;
-                                else if (prod_dx[13]) msb_pos = 33;
-                                else if (prod_dx[12]) msb_pos = 34;
-                                else if (prod_dx[11]) msb_pos = 35;
-                                else if (prod_dx[10]) msb_pos = 36;
-                                else if (prod_dx[ 9]) msb_pos = 37;
-                                else if (prod_dx[ 8]) msb_pos = 38;
-                                else if (prod_dx[ 7]) msb_pos = 39;
-                                else if (prod_dx[ 6]) msb_pos = 40;
-                                else if (prod_dx[ 5]) msb_pos = 41;
-                                else if (prod_dx[ 4]) msb_pos = 42;
-                                else if (prod_dx[ 3]) msb_pos = 43;
-                                else if (prod_dx[ 2]) msb_pos = 44;
-                                else if (prod_dx[ 1]) msb_pos = 45;
-                                else if (prod_dx[ 0]) msb_pos = 46;
-                            end
-                            prod_dx_adj = dx_is_zero ? 47'd0 : (prod_dx[46:0] << (6'd46 - msb_pos));
-                            prod_exp = dx_is_zero ? 8'd0 : (px_exp + msb_pos - 8'd27);
-                            dot_held_prod    <= prod_dx_adj[46:20];
-                            dot_held_exp     <= prod_exp;
-                            dot_held_sign    <= px_sign;
-                            dot_held_dx_zero <= dx_is_zero;
-                            dot_held_ps_mant <= ps_mant; dot_held_ps_exp <= ps_exp;
-                            dot_held_ps_sign <= ps_sign;
-                            dot_held_py_mant <= py_mant; dot_held_py_exp <= py_exp;
-                            dot_held_py_sign <= py_sign;
-                            dot_held_dy      <= dy_i;
-                            dot_phase <= 1'b1;
-                            s2_valid  <= 1'b0;
-                        end
+                    if (any_nan_d)
+                        special_result = 32'h7FC00000;
+                    else if (px_infzero || py_infzero || inf_cancel)
+                        special_result = 32'h7FC00000;
+                    else if (ps_inf)
+                        special_result = {ps_sign, 8'hFF, 23'd0};
+                    else if (px_inf)
+                        special_result = {px_sign, 8'hFF, 23'd0};
+                    else if (py_inf)
+                        special_result = {py_sign, 8'hFF, 23'd0};
+                    else
+                        special_result = 32'd0;
+
+                    if (dot_special_flag) begin
+                        s2_special <= any_nan_d ? 3'd1 :
+                                      (ps_inf ? (ps_sign ? 3'd3 : 3'd2) :
+                                       px_inf ? (px_sign ? 3'd3 : 3'd2) :
+                                       py_inf ? (py_sign ? 3'd3 : 3'd2) : 3'd1);
+                        s2_special_result <= special_result;
+                        s2_term1 <= 0; s2_term2 <= 0; s2_term3 <= 0;
                     end else begin
-                        // === PHASE 1: compute Py*Dy, align all 3 ===
-                        dot_phase <= 1'b0;
-                        prod_dy = shared_product;
-                        dy_is_zero = (dot_held_py_mant == 0) || (dot_held_dy[10:0] == 11'd0);
-                        msb_pos = 0;
-                        if (!dy_is_zero) begin
-    msb_pos = 0;
-                                if      (prod_dy[46]) msb_pos = 0;
-                                else if (prod_dy[45]) msb_pos = 1;
-                                else if (prod_dy[44]) msb_pos = 2;
-                                else if (prod_dy[43]) msb_pos = 3;
-                                else if (prod_dy[42]) msb_pos = 4;
-                                else if (prod_dy[41]) msb_pos = 5;
-                                else if (prod_dy[40]) msb_pos = 6;
-                                else if (prod_dy[39]) msb_pos = 7;
-                                else if (prod_dy[38]) msb_pos = 8;
-                                else if (prod_dy[37]) msb_pos = 9;
-                                else if (prod_dy[36]) msb_pos = 10;
-                                else if (prod_dy[35]) msb_pos = 11;
-                                else if (prod_dy[34]) msb_pos = 12;
-                                else if (prod_dy[33]) msb_pos = 13;
-                                else if (prod_dy[32]) msb_pos = 14;
-                                else if (prod_dy[31]) msb_pos = 15;
-                                else if (prod_dy[30]) msb_pos = 16;
-                                else if (prod_dy[29]) msb_pos = 17;
-                                else if (prod_dy[28]) msb_pos = 18;
-                                else if (prod_dy[27]) msb_pos = 19;
-                                else if (prod_dy[26]) msb_pos = 20;
-                                else if (prod_dy[25]) msb_pos = 21;
-                                else if (prod_dy[24]) msb_pos = 22;
-                                else if (prod_dy[23]) msb_pos = 23;
-                                else if (prod_dy[22]) msb_pos = 24;
-                                else if (prod_dy[21]) msb_pos = 25;
-                                else if (prod_dy[20]) msb_pos = 26;
-                                else if (prod_dy[19]) msb_pos = 27;
-                                else if (prod_dy[18]) msb_pos = 28;
-                                else if (prod_dy[17]) msb_pos = 29;
-                                else if (prod_dy[16]) msb_pos = 30;
-                                else if (prod_dy[15]) msb_pos = 31;
-                                else if (prod_dy[14]) msb_pos = 32;
-                                else if (prod_dy[13]) msb_pos = 33;
-                                else if (prod_dy[12]) msb_pos = 34;
-                                else if (prod_dy[11]) msb_pos = 35;
-                                else if (prod_dy[10]) msb_pos = 36;
-                                else if (prod_dy[ 9]) msb_pos = 37;
-                                else if (prod_dy[ 8]) msb_pos = 38;
-                                else if (prod_dy[ 7]) msb_pos = 39;
-                                else if (prod_dy[ 6]) msb_pos = 40;
-                                else if (prod_dy[ 5]) msb_pos = 41;
-                                else if (prod_dy[ 4]) msb_pos = 42;
-                                else if (prod_dy[ 3]) msb_pos = 43;
-                                else if (prod_dy[ 2]) msb_pos = 44;
-                                else if (prod_dy[ 1]) msb_pos = 45;
-                                else if (prod_dy[ 0]) msb_pos = 46;
+                        s2_special <= 3'd0;
+                        s2_special_result <= 32'd0;
+
+                        // Compute raw products (24×11 area-efficient multiply)
+                        prod_dx = px_mant * dx_i[10:0];
+                        prod_dy = py_mant * dy_i[10:0];
+                        px_sign_bit = px_sign;
+                        py_sign_bit = py_sign;
+
+                        dx_is_zero = px_zero || (dx_i[10:0] == 11'd0);
+                        dy_is_zero = py_zero || (dy_i[10:0] == 11'd0);
+
+                        // Normalize dot products: find MSB, shift to bit 46
+                        msb_pos_dx = 0;
+                        if (!dx_is_zero) begin
+                            for (j = 46; j >= 0; j = j - 1) begin
+                                if (prod_dx[j] && (msb_pos_dx == 0))
+                                    msb_pos_dx = j[5:0];
+                            end
                         end
-                        prod_dy_adj = dy_is_zero ? 47'd0 : (prod_dy[46:0] << (6'd46 - msb_pos));
-                        prod_exp_adj = dy_is_zero ? 8'd0 : (dot_held_py_exp + msb_pos - 8'd27);
-                        anchor_exp = dot_held_ps_exp;
-                        if (dot_held_exp > anchor_exp) anchor_exp = dot_held_exp;
+                        msb_pos_dy = 0;
+                        if (!dy_is_zero) begin
+                            for (j = 46; j >= 0; j = j - 1) begin
+                                if (prod_dy[j] && (msb_pos_dy == 0))
+                                    msb_pos_dy = j[5:0];
+                            end
+                        end
+
+                        // Shift products to normalize (MSB → bit 46), full width
+                        prod_dx_adj = dx_is_zero ? 47'd0 :
+                            (prod_dx[46:0] << (6'd46 - msb_pos_dx));
+                        prod_dy_adj = dy_is_zero ? 47'd0 :
+                            (prod_dy[46:0] << (6'd46 - msb_pos_dy));
+
+                        // Product exponents (with normalization)
+                        prod_exp = dx_is_zero ? 8'd0 :
+                            (px_exp + msb_pos_dx - 8'd27);
+                        prod_exp_adj = dy_is_zero ? 8'd0 :
+                            (py_exp + msb_pos_dy - 8'd27);
+
+                        // Anchor exponent = max(prod_dx_exp, prod_dy_exp, ps_exp)
+                        anchor_exp = ps_exp;
+                        if (prod_exp > anchor_exp) anchor_exp = prod_exp;
                         if (prod_exp_adj > anchor_exp) anchor_exp = prod_exp_adj;
-                        if (anchor_exp >= dot_held_ps_exp) begin
-                            reg [7:0] sh; sh = anchor_exp - dot_held_ps_exp;
-                            ps_aligned = ((dot_held_ps_mant == 0) || sh >= INT_W) ? 0 : log_shr({1'b0, dot_held_ps_mant, {AD_PAD{1'b0}}}, sh[5:0]);
-                        end else ps_aligned = 0;
-                        if (anchor_exp >= dot_held_exp) begin
-                            reg [7:0] sh; sh = anchor_exp - dot_held_exp;
-                            dx_aligned = (dot_held_dx_zero || sh >= INT_W) ? 0 : log_shr({1'b0, dot_held_prod}, sh[5:0]);
-                        end else dx_aligned = 0;
+
+                        // Align Ps
+                        if (anchor_exp >= ps_exp) begin
+                            reg [7:0] ps_shift;
+                            ps_shift = anchor_exp - ps_exp;
+                            if (ps_zero || ps_shift >= INT_W)
+                                ps_aligned = 0;
+                            else
+                                ps_aligned = log_shr({1'b0, ps_mant, {AD_PAD{1'b0}}}, ps_shift[5:0]);
+                        end else
+                            ps_aligned = 0;
+
+                        // Align dx product
+                        if (anchor_exp >= prod_exp) begin
+                            reg [7:0] dx_shift;
+                            dx_shift = anchor_exp - prod_exp;
+                            if (dx_is_zero || dx_shift >= INT_W)
+                                dx_aligned = 0;
+                            else
+                                dx_aligned = log_shr({1'b0, prod_dx_adj[46:20]}, dx_shift[5:0]);
+                        end else
+                            dx_aligned = {1'b0, prod_dx_adj[46:20]};
+
+                        // Align dy product
                         if (anchor_exp >= prod_exp_adj) begin
-                            reg [7:0] sh; sh = anchor_exp - prod_exp_adj;
-                            dy_aligned = (dy_is_zero || sh >= INT_W) ? 0 : log_shr({1'b0, prod_dy_adj[46:20]}, sh[5:0]);
-                        end else dy_aligned = {1'b0, prod_dy_adj[46:20]};
-                        s2_special <= 3'd0; s2_special_result <= 32'd0;
+                            reg [7:0] dy_shift;
+                            dy_shift = anchor_exp - prod_exp_adj;
+                            if (dy_is_zero || dy_shift >= INT_W)
+                                dy_aligned = 0;
+                            else
+                                dy_aligned = log_shr({1'b0, prod_dy_adj[46:20]}, dy_shift[5:0]);
+                        end else
+                            dy_aligned = {1'b0, prod_dy_adj[46:20]};
+
                         s2_exp   <= anchor_exp;
                         s2_term1 <= ps_aligned;
                         s2_term2 <= dx_aligned;
                         s2_term3 <= dy_aligned;
-                        s2_sign1 <= (dot_held_ps_mant == 0) ? 2'd0 : (dot_held_ps_sign ? 2'd2 : 2'd1);
-                        s2_sign2 <= dot_held_dx_zero ? 2'd0 : (dot_held_sign ? 2'd2 : 2'd1);
-                        s2_sign3 <= dy_is_zero ? 2'd0 : (dot_held_py_sign ? 2'd2 : 2'd1);
+                        s2_sign1 <= ps_zero ? 2'd0 : (ps_sign ? 2'd2 : 2'd1);
+                        s2_sign2 <= dx_is_zero ? 2'd0 : (px_sign_bit ? 2'd2 : 2'd1);
+                        s2_sign3 <= dy_is_zero ? 2'd0 : (py_sign_bit ? 2'd2 : 2'd1);
                     end
                 end
             end
         end
     end
 
+    // ============================================================
     // Stage 2: CPA Sum, Absolute Value, LOD, Sticky
     // ============================================================
     reg         s3_valid;
