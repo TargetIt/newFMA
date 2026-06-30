@@ -1,10 +1,10 @@
 # Project Sign-Off Report
 
-**Date:** 2026-06-30 05:10 UTC
+**Date:** 2026-06-30 13:21 UTC
 
-**Overall:** ⚠️ CONDITIONAL PASS — 3 requirement(s) partially met, review needed
+**Overall:** ❌ FAIL — {failed_count} requirement(s) not met
 
-**Verdict:** 7/10 passed, 3 partial, 0 failed
+**Verdict:** 6/10 passed, 2 partial, 2 failed
 **Project:** run-001
 
 ---
@@ -22,7 +22,7 @@
 |-------|----------|
 | spec | REQ-SPEC-001, REQ-SPEC-002 |
 | rtl | FEAT-001 |
-| verify | 12 tests (001~006,017~022) |
+| verify | 12 tests |
 | synth | — |
 | timing | — |
 
@@ -42,7 +42,7 @@
 |-------|----------|
 | spec | REQ-SPEC-003~005 |
 | rtl | FEAT-002 |
-| verify | implicit (all 22 tests) |
+| verify | implicit via all tests |
 | synth | — |
 | timing | — |
 
@@ -61,7 +61,7 @@
 |-------|----------|
 | spec | REQ-SPEC-006~009 |
 | rtl | FEAT-003, FEAT-004 |
-| verify | 6 tests (007~011,016) |
+| verify | 6 tests |
 | synth | — |
 | timing | — |
 
@@ -81,7 +81,7 @@
 |-------|----------|
 | spec | REQ-SPEC-010~014 |
 | rtl | FEAT-005a, FEAT-005b |
-| verify | 5 tests (012~015) |
+| verify | 5 tests |
 | synth | — |
 | timing | — |
 
@@ -100,7 +100,7 @@
 |-------|----------|
 | spec | REQ-SPEC-015, REQ-SPEC-016 |
 | rtl | FEAT-006a, FEAT-006b |
-| verify | 6 tests (017~022) |
+| verify | 6 tests |
 | synth | — |
 | timing | — |
 
@@ -120,12 +120,12 @@
 |-------|----------|
 | spec | REQ-SPEC-017~019 |
 | rtl | FEAT-007a, FEAT-007b |
-| verify | no dedicated latency test |
+| verify | 无独立延迟测试 |
 | synth | — |
 | timing | — |
 
 **判定: ⚠️ PARTIAL** — 部分达成
-**遗留:** missing explicit 3-cycle delay test (low priority, functionality correct)
+**遗留:** 缺少显式 3-cycle 延迟测试（功能正确，低优先级）
 
 ---
 
@@ -142,15 +142,15 @@
 | spec | REQ-SPEC-020, REQ-SPEC-021 |
 | rtl | FEAT-008 |
 | verify | — |
-| synth | PASS (synth -top + abc) |
+| synth | Yosys+ABC+SKY130, synth-top flow |
 | timing | ABC替代OpenSTA |
 
 **判定: ⚠️ PARTIAL** — 部分达成
-**遗留:** OpenSTA not available; ABC timing-driven synthesis used; flatten vs hierarchy deviation
+**遗留:** OpenSTA 不可用，用 ABC 时序驱动综合替代；flatten 代替 hierarchy
 
 ---
 
-### CR-008: 参考 PPA 基线
+### CR-008: 验证要求
 
 **需求:** 参考 PPA 基线
 | 指标 | 值 |
@@ -162,27 +162,9 @@
 
 | Stage | Coverage |
 |-------|----------|
-| spec | REQ-SPEC-022 |
-| rtl | — |
-| verify | — |
-| synth | generic -25.5%, SKY130 -16.4% |
-| timing | >60% faster |
-
-**判定: ⚠️ PARTIAL** — 部分达成
-**遗留:** Hold slack not measured; SKY130 improvement metric depends on baseline definition
-
----
-
-### CR-009: 验证要求
-
-**需求:** 验证要求
-必须覆盖的测试类别：FMA 同号、FMA 异号、Sticky/Round、Zero/FTZ、Special(NaN/Inf)、Dot(dx/dy边界/dot_p_msb_i组合/Px/Py异号)
-
-| Stage | Coverage |
-|-------|----------|
 | spec | REQ-SPEC-023 |
 | rtl | — |
-| verify | 22/22 (6 categories) |
+| verify | 22/22 (6 类别) |
 | synth | — |
 | timing | — |
 
@@ -190,7 +172,25 @@
 
 ---
 
-### CR-010: 优化目标 >=20%
+### CR-009: 优化目标 vs 参考
+
+**需求:** 验证要求
+必须覆盖的测试类别：FMA 同号、FMA 异号、Sticky/Round、Zero/FTZ、Special(NaN/Inf)、Dot(dx/dy边界/dot_p_msb_i组合/Px/Py异号)
+
+| Stage | Coverage |
+|-------|----------|
+| spec | REQ-SPEC-024, REQ-SPEC-025 |
+| rtl | FEAT-009a~e (INT_W=28, 24x12, 24x11, log shifter, dead regs) |
+| verify | — |
+| synth | 面积 52,100 um2 (参考 40,512), cells 7,560 (参考 5,406) |
+| timing | >60% faster (8ns MET) |
+
+**判定: ❌ FAIL** — 未达成
+**原因:** 面积 +28.6%, cells +39.8% vs 参考。时序达标但面积未达标。需进一步优化或重新设计架构。
+
+---
+
+### CR-010: CR-010
 
 **需求:** 优化目标
 - 面积比参考好 ≥20%
@@ -198,21 +198,21 @@
 
 | Stage | Coverage |
 |-------|----------|
-| spec | REQ-SPEC-024, REQ-SPEC-025 |
-| rtl | FEAT-009a~e |
+| spec | — |
+| rtl | — |
 | verify | — |
-| synth | generic -25.5% MET |
-| timing | >60% MET |
+| synth | — |
+| timing | — |
 
-**判定: ✅ PASS** — 需求已达成
+**判定: ❌ FAIL** — 未达成
+**原因:** 
 
 ---
 
 ## Action Items (Partial Requirements)
 
-- **CR-006** (流水线 3-stage): missing explicit 3-cycle delay test (low priority, functionality correct)
-- **CR-007** (综合/STA 工具): OpenSTA not available; ABC timing-driven synthesis used; flatten vs hierarchy deviation
-- **CR-008** (参考 PPA 基线): Hold slack not measured; SKY130 improvement metric depends on baseline definition
+- **CR-006** (流水线 3-stage): 缺少显式 3-cycle 延迟测试（功能正确，低优先级）
+- **CR-007** (综合/STA 工具): OpenSTA 不可用，用 ABC 时序驱动综合替代；flatten 代替 hierarchy
 
 ## Evidence Inventory
 
