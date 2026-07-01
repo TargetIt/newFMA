@@ -219,7 +219,7 @@ module fma_fp32_dot3 (
 
                     // Compute all values (blocking) before branching
                     // Area-optimized 24×12 multiplier (truncate 12 LSBs, shift to align)
-                    prod_mant = (b_mant * c_mant[23:12]) << 12;
+                    prod_mant = b_mant * c_mant;
                     prod_is_zero = b_zero || c_zero;
                     prod_exp = prod_is_zero ? 8'd0 : (b_exp + c_exp - BIAS);
 
