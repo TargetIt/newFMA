@@ -1,0 +1,95 @@
+
+16. Printing statistics.
+
+=== fma_fp32_dot3 ===
+
+        +----------Local Count, excluding submodules.
+        |        +-Local Area, excluding submodules.
+        |        | 
+     6353        - wires
+     6785        - wire bits
+       27        - public wires
+      305        - public wire bits
+       12        - ports
+      159        - port bits
+     6653 4.62E+04 cells
+        1   11.261   sky130_fd_sc_hd__a2111o_1
+        8   70.067   sky130_fd_sc_hd__a2111oi_0
+       12  105.101   sky130_fd_sc_hd__a211o_1
+       29  217.709   sky130_fd_sc_hd__a211oi_1
+        3   30.029   sky130_fd_sc_hd__a21bo_1
+       25   187.68   sky130_fd_sc_hd__a21boi_0
+       46  345.331   sky130_fd_sc_hd__a21o_1
+      504 2.52E+03   sky130_fd_sc_hd__a21oi_1
+       10  100.096   sky130_fd_sc_hd__a221o_1
+       24  210.202   sky130_fd_sc_hd__a221oi_1
+       26  227.718   sky130_fd_sc_hd__a22o_1
+       69  517.997   sky130_fd_sc_hd__a22oi_1
+        3   26.275   sky130_fd_sc_hd__a2bb2oi_1
+        5   50.048   sky130_fd_sc_hd__a311o_1
+       17  148.893   sky130_fd_sc_hd__a311oi_1
+       11   96.342   sky130_fd_sc_hd__a31o_1
+       75    469.2   sky130_fd_sc_hd__a31oi_1
+       13  130.125   sky130_fd_sc_hd__a32o_1
+        9   78.826   sky130_fd_sc_hd__a32oi_1
+        1    10.01   sky130_fd_sc_hd__a41o_1
+        6    52.55   sky130_fd_sc_hd__a41oi_1
+       69  431.664   sky130_fd_sc_hd__and2_0
+       94  588.064   sky130_fd_sc_hd__and3_1
+        1    8.758   sky130_fd_sc_hd__and3b_1
+        6    52.55   sky130_fd_sc_hd__and4_1
+        4   40.038   sky130_fd_sc_hd__and4b_1
+      209  784.502   sky130_fd_sc_hd__clkinv_1
+      176  4.4E+03   sky130_fd_sc_hd__dfrtp_1
+       68  425.408   sky130_fd_sc_hd__lpflow_inputiso1p_1
+      192  1.2E+03   sky130_fd_sc_hd__lpflow_isobufsrc_1
+      319 3.19E+03   sky130_fd_sc_hd__maj3_1
+       67  754.474   sky130_fd_sc_hd__mux2_1
+      243 2.43E+03   sky130_fd_sc_hd__mux2i_1
+       13  292.781   sky130_fd_sc_hd__mux4_2
+     1008 3.78E+03   sky130_fd_sc_hd__nand2_1
+       55   344.08   sky130_fd_sc_hd__nand2b_1
+      127   635.61   sky130_fd_sc_hd__nand3_1
+        3   22.522   sky130_fd_sc_hd__nand3b_1
+       46  287.776   sky130_fd_sc_hd__nand4_1
+        1    8.758   sky130_fd_sc_hd__nand4b_1
+      728 2.73E+03   sky130_fd_sc_hd__nor2_1
+       21  131.376   sky130_fd_sc_hd__nor2b_1
+      102   510.49   sky130_fd_sc_hd__nor3_1
+       11   82.579   sky130_fd_sc_hd__nor3b_1
+       56  350.336   sky130_fd_sc_hd__nor4_1
+        5   43.792   sky130_fd_sc_hd__nor4b_1
+        2   20.019   sky130_fd_sc_hd__nor4bb_1
+        1   11.261   sky130_fd_sc_hd__o2111a_1
+       36  315.302   sky130_fd_sc_hd__o2111ai_1
+       14  140.134   sky130_fd_sc_hd__o211a_1
+       54  405.389   sky130_fd_sc_hd__o211ai_1
+       42  315.302   sky130_fd_sc_hd__o21a_1
+      436 2.18E+03   sky130_fd_sc_hd__o21ai_0
+        2   20.019   sky130_fd_sc_hd__o21ba_1
+       14  105.101   sky130_fd_sc_hd__o21bai_1
+        2   22.522   sky130_fd_sc_hd__o221a_1
+       15  131.376   sky130_fd_sc_hd__o221ai_1
+       12  105.101   sky130_fd_sc_hd__o22a_1
+       79  494.224   sky130_fd_sc_hd__o22ai_1
+        1    10.01   sky130_fd_sc_hd__o2bb2a_1
+        4   35.034   sky130_fd_sc_hd__o2bb2ai_1
+        1    10.01   sky130_fd_sc_hd__o311a_1
+        3   26.275   sky130_fd_sc_hd__o311ai_0
+        7   61.309   sky130_fd_sc_hd__o31a_1
+       42  315.302   sky130_fd_sc_hd__o31ai_1
+       42  367.853   sky130_fd_sc_hd__o32ai_1
+        3   33.782   sky130_fd_sc_hd__o41a_1
+        2   17.517   sky130_fd_sc_hd__o41ai_1
+       21  131.376   sky130_fd_sc_hd__or3_1
+        1    8.758   sky130_fd_sc_hd__or3b_1
+       25   187.68   sky130_fd_sc_hd__or4_1
+        2   20.019   sky130_fd_sc_hd__or4b_1
+      762 6.67E+03   sky130_fd_sc_hd__xnor2_1
+       19   427.91   sky130_fd_sc_hd__xnor3_1
+      474 4.15E+03   sky130_fd_sc_hd__xor2_1
+       14  332.819   sky130_fd_sc_hd__xor3_1
+
+   Chip area for module '\fma_fp32_dot3': 46229.337600
+     of which used for sequential elements: 4404.224000 (9.53%)
+

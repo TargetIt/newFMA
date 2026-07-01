@@ -69,22 +69,21 @@ module fma_fp32_dot3 (
     // Stage 1: Unpack, Special Detect, Multiply, Alignment
     // ============================================================
     reg         s2_valid;
-    reg  [1:0]  s2_special;           // special case encoding
+    reg  [1:0]  s2_special;           // 0=normal, 1=qNaN, 2=+Inf, 3=-Inf
     reg  [7:0]  s2_exp;               // anchor exponent for result
     reg  [INT_W-1:0] s2_term1;        // first term (signed magnitude)
     reg  [INT_W-1:0] s2_term2;        // second term
     reg  [INT_W-1:0] s2_term3;        // third term (dot mode only)
     reg  [1:0]  s2_sign1, s2_sign2, s2_sign3; // sign: 0=zero,1=pos,2=neg. s2_sign3!=0 => 3-term
-    reg  [31:0] s2_special_result;    // pre-computed special result
 
-    // Special encoding: 0=normal, 1=qNaN, 2=Inf(+), 3=Inf(-), 4=zero
-    function [2:0] encode_special;
+    // Special encoding: 0=normal, 1=qNaN, 2=+Inf, 3=-Inf
+    function [1:0] encode_special;
         input is_nan, is_inf, sign;
         begin
-            if (is_nan)  encode_special = 3'd1;
-            else if (is_inf && sign) encode_special = 3'd3;
-            else if (is_inf)         encode_special = 3'd2;
-            else                     encode_special = 3'd0;
+            if (is_nan)  encode_special = 2'd1;
+            else if (is_inf && sign) encode_special = 2'd3;
+            else if (is_inf)         encode_special = 2'd2;
+            else                     encode_special = 2'd0;
         end
     endfunction
 
@@ -135,41 +134,6 @@ module fma_fp32_dot3 (
         end
     endfunction
 
-    // Priority special case resolution
-    function [31:0] resolve_special;
-        input a_nan, a_inf, a_sign, b_nan, b_inf, b_sign, c_nan, c_inf, c_sign;
-        input b_zero, c_zero, a_zero;
-        input is_dot;
-        reg any_nan, a_inf_bc_inf_opp, inf_times_zero, remaining_inf;
-        reg res_sign;
-        begin
-            any_nan = a_nan || b_nan || c_nan;
-            // Inf * 0 check
-            inf_times_zero = (b_inf && c_zero) || (b_zero && c_inf);
-            // A Inf + opposite sign B*C Inf
-            a_inf_bc_inf_opp = a_inf && b_inf && c_inf && (a_sign != (b_sign ^ c_sign));
-            // Remaining Inf
-            remaining_inf = a_inf || b_inf || c_inf;
-
-            // Determine result sign for Inf cases
-            if (a_inf) res_sign = a_sign;
-            else if (b_inf && c_inf) res_sign = b_sign ^ c_sign;
-            else if (b_inf) res_sign = b_sign;
-            else res_sign = c_sign;
-
-            if (any_nan)
-                resolve_special = 32'h7FC00000;  // quiet NaN
-            else if (inf_times_zero || a_inf_bc_inf_opp)
-                resolve_special = 32'h7FC00000;  // qNaN
-            else if (remaining_inf)
-                resolve_special = {res_sign, 8'hFF, 23'd0};  // signed Inf
-            else if (a_zero && ((b_inf && c_zero) || (b_zero && c_inf)))
-                resolve_special = 32'h7FC00000;
-            else
-                resolve_special = 32'h00000000;  // normal path marker
-        end
-    endfunction
-
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s2_valid    <= 1'b0;
@@ -181,7 +145,6 @@ module fma_fp32_dot3 (
             s2_sign1    <= 2'd0;
             s2_sign2    <= 2'd0;
             s2_sign3    <= 2'd0;
-            s2_special_result <= 32'd0;
         end else begin
             s2_valid <= valid_i;
 
@@ -203,22 +166,26 @@ module fma_fp32_dot3 (
                     reg prod_is_zero;
                     reg [46:0] prod_mant_adj;
                     reg [7:0] prod_exp_adj;
-                    reg [31:0] special_result;
                     reg [7:0] anchor_exp;
+                    reg fma_has_nan, fma_inf_zero, fma_inf_cancel, fma_has_inf;
+                    reg fma_inf_sign;
 
                     {a_nan, a_inf, a_zero, a_sign, a_exp, a_mant} = unpack_ftz(a_i);
                     {b_nan, b_inf, b_zero, b_sign, b_exp, b_mant} = unpack_ftz(b_i);
                     {c_nan, c_inf, c_zero, c_sign, c_exp, c_mant} = unpack_ftz(c_i);
 
-                    special_result = resolve_special(
-                        a_nan, a_inf, a_sign,
-                        b_nan, b_inf, b_sign,
-                        c_nan, c_inf, c_sign,
-                        b_zero, c_zero, a_zero, 1'b0
-                    );
+                    // Special case classification (replaces resolve_special)
+                    fma_has_nan  = a_nan || b_nan || c_nan;
+                    fma_inf_zero = (b_inf && c_zero) || (b_zero && c_inf);
+                    fma_inf_cancel = a_inf && b_inf && c_inf && (a_sign != (b_sign ^ c_sign));
+                    fma_has_inf  = a_inf || b_inf || c_inf;
+
+                    if (a_inf)      fma_inf_sign = a_sign;
+                    else if (b_inf && c_inf) fma_inf_sign = b_sign ^ c_sign;
+                    else if (b_inf) fma_inf_sign = b_sign;
+                    else            fma_inf_sign = c_sign;
 
                     // Compute all values (blocking) before branching
-                    // Area-optimized 24×12 multiplier (truncate 12 LSBs, shift to align)
                     prod_mant = (b_mant * c_mant[23:20]) << 20;
                     prod_is_zero = b_zero || c_zero;
                     prod_exp = prod_is_zero ? 8'd0 : (b_exp + c_exp - BIAS);
@@ -245,16 +212,17 @@ module fma_fp32_dot3 (
                             log_shr({1'b0, prod_mant_adj[46:20]}, align_diff[5:0]);
                     end
 
-                    // Special case detection
-                    if (a_nan || b_nan || c_nan || a_inf || b_inf || c_inf ||
-                        (b_inf && c_zero) || (b_zero && c_inf)) begin
-                        s2_special <= encode_special(a_nan || b_nan || c_nan,
-                                                     a_inf || b_inf || c_inf, 1'b0);
-                        s2_special_result <= special_result;
+                    // Special case dispatch
+                    if (fma_has_nan || fma_inf_zero || fma_inf_cancel) begin
+                        s2_special <= 2'd1;  // qNaN
+                        s2_term1 <= 0; s2_term2 <= 0; s2_term3 <= 0;
+                        s2_sign1 <= 2'd0; s2_sign2 <= 2'd0; s2_sign3 <= 2'd0;
+                    end else if (fma_has_inf) begin
+                        s2_special <= fma_inf_sign ? 2'd3 : 2'd2;
+                        s2_term1 <= 0; s2_term2 <= 0; s2_term3 <= 0;
                         s2_sign1 <= 2'd0; s2_sign2 <= 2'd0; s2_sign3 <= 2'd0;
                     end else begin
-                        s2_special <= 3'd0;
-                        s2_special_result <= 32'd0;
+                        s2_special <= 2'd0;
                         s2_sign1 <= (a_sign && ~a_zero) ? 2'd2 : (a_zero ? 2'd0 : 2'd1);
                         s2_sign2 <= (b_zero || c_zero) ? 2'd0 :
                                     ((b_sign ^ c_sign) ? 2'd2 : 2'd1);
@@ -262,10 +230,8 @@ module fma_fp32_dot3 (
                     end
 
                     s2_exp   <= anchor_exp;
-                    s2_term1 <= (a_nan || b_nan || c_nan || a_inf || b_inf || c_inf ||
-                                 (b_inf && c_zero) || (b_zero && c_inf)) ? 0 : addend_aligned;
-                    s2_term2 <= (a_nan || b_nan || c_nan || a_inf || b_inf || c_inf ||
-                                 (b_inf && c_zero) || (b_zero && c_inf)) ? 0 : prod_aligned;
+                    s2_term1 <= (fma_has_nan || fma_has_inf || fma_inf_zero) ? 0 : addend_aligned;
+                    s2_term2 <= (fma_has_nan || fma_has_inf || fma_inf_zero) ? 0 : prod_aligned;
                     s2_term3 <= 0;
 
                 end else begin
@@ -279,15 +245,11 @@ module fma_fp32_dot3 (
                     reg [23:0] ps_mant, px_mant, py_mant;
                     reg [47:0] prod_dx, prod_dy;
                     reg [46:0] prod_dx_adj, prod_dy_adj;
-                    reg px_sign_bit, py_sign_bit;
                     reg [7:0] prod_exp, prod_exp_adj;
                     reg [5:0] msb_pos_dx, msb_pos_dy;
                     integer j;
-                    reg signed [8:0] align_diff;
                     reg [INT_W-1:0] ps_aligned, dx_aligned, dy_aligned;
-                    reg ps_is_zero;
                     reg dx_is_zero, dy_is_zero;
-                    reg [31:0] special_result;
                     reg [7:0] anchor_exp;
                     reg any_nan_d, px_infzero, py_infzero, inf_cancel;
                     reg dot_special_flag;
@@ -303,35 +265,19 @@ module fma_fp32_dot3 (
                     dot_special_flag = any_nan_d || ps_inf || px_inf || py_inf ||
                                        px_infzero || py_infzero;
 
-                    if (any_nan_d)
-                        special_result = 32'h7FC00000;
-                    else if (px_infzero || py_infzero || inf_cancel)
-                        special_result = 32'h7FC00000;
-                    else if (ps_inf)
-                        special_result = {ps_sign, 8'hFF, 23'd0};
-                    else if (px_inf)
-                        special_result = {px_sign, 8'hFF, 23'd0};
-                    else if (py_inf)
-                        special_result = {py_sign, 8'hFF, 23'd0};
-                    else
-                        special_result = 32'd0;
-
                     if (dot_special_flag) begin
-                        s2_special <= any_nan_d ? 3'd1 :
-                                      (ps_inf ? (ps_sign ? 3'd3 : 3'd2) :
-                                       px_inf ? (px_sign ? 3'd3 : 3'd2) :
-                                       py_inf ? (py_sign ? 3'd3 : 3'd2) : 3'd1);
-                        s2_special_result <= special_result;
+                        s2_special <= (any_nan_d || px_infzero || py_infzero || inf_cancel) ? 2'd1 :
+                                      ps_inf ? (ps_sign ? 2'd3 : 2'd2) :
+                                      px_inf ? (px_sign ? 2'd3 : 2'd2) :
+                                      py_inf ? (py_sign ? 2'd3 : 2'd2) : 2'd1;
                         s2_term1 <= 0; s2_term2 <= 0; s2_term3 <= 0;
+                        s2_sign1 <= 2'd0; s2_sign2 <= 2'd0; s2_sign3 <= 2'd0;
                     end else begin
-                        s2_special <= 3'd0;
-                        s2_special_result <= 32'd0;
+                        s2_special <= 2'd0;
 
-                        // Compute raw products (24×11 area-efficient multiply)
+                        // Compute raw products (24x11 area-efficient multiply)
                         prod_dx = px_mant * dx_i[10:0];
                         prod_dy = py_mant * dy_i[10:0];
-                        px_sign_bit = px_sign;
-                        py_sign_bit = py_sign;
 
                         dx_is_zero = px_zero || (dx_i[10:0] == 11'd0);
                         dy_is_zero = py_zero || (dy_i[10:0] == 11'd0);
@@ -352,7 +298,7 @@ module fma_fp32_dot3 (
                             end
                         end
 
-                        // Shift products to normalize (MSB → bit 46), full width
+                        // Shift products to normalize (MSB -> bit 46), full width
                         prod_dx_adj = dx_is_zero ? 47'd0 :
                             (prod_dx[46:0] << (6'd46 - msb_pos_dx));
                         prod_dy_adj = dy_is_zero ? 47'd0 :
@@ -407,8 +353,8 @@ module fma_fp32_dot3 (
                         s2_term2 <= dx_aligned;
                         s2_term3 <= dy_aligned;
                         s2_sign1 <= ps_zero ? 2'd0 : (ps_sign ? 2'd2 : 2'd1);
-                        s2_sign2 <= dx_is_zero ? 2'd0 : (px_sign_bit ? 2'd2 : 2'd1);
-                        s2_sign3 <= dy_is_zero ? 2'd0 : (py_sign_bit ? 2'd2 : 2'd1);
+                        s2_sign2 <= dx_is_zero ? 2'd0 : (px_sign ? 2'd2 : 2'd1);
+                        s2_sign3 <= dy_is_zero ? 2'd0 : (py_sign ? 2'd2 : 2'd1);
                     end
                 end
             end
@@ -420,27 +366,22 @@ module fma_fp32_dot3 (
     // ============================================================
     reg         s3_valid;
     reg  [1:0]  s3_special;
-    reg  [31:0] s3_special_result;
     reg  [7:0]  s3_exp;
     reg         s3_result_sign;
     reg  [INT_W-1:0] s3_mant;         // absolute value of sum
     reg  [4:0]  s3_lod;               // leading-one detect shift amount
-    reg         s3_result_is_zero;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s3_valid    <= 1'b0;
             s3_special  <= 2'd0;
-            s3_special_result <= 32'd0;
             s3_exp      <= 8'd0;
             s3_result_sign <= 1'b0;
             s3_mant     <= 0;
             s3_lod      <= 5'd0;
-            s3_result_is_zero <= 1'b0;
         end else begin
             s3_valid     <= s2_valid;
             s3_special   <= s2_special;
-            s3_special_result <= s2_special_result;
             s3_exp       <= s2_exp;
 
             if (s2_valid && s2_special == 2'd0) begin
@@ -449,27 +390,12 @@ module fma_fp32_dot3 (
                 reg [INT_W-1:0] sum_abs;
                 reg [5:0] lod;
 
-                // Signed addition: convert sign-magnitude to 2's complement terms
-                // Verilog '-' on unsigned produces 2's complement; assign to signed.
-                if (|s2_sign3) begin
-                    // Three-term addition (Dot mode)
-                    reg signed [INT_W:0] t1, t2, t3;
-                    t1 = (s2_sign1 == 2'd1) ? {1'b0, s2_term1} :
-                         (s2_sign1 == 2'd2) ? -{1'b0, s2_term1} : 0;
-                    t2 = (s2_sign2 == 2'd1) ? {1'b0, s2_term2} :
-                         (s2_sign2 == 2'd2) ? -{1'b0, s2_term2} : 0;
-                    t3 = (s2_sign3 == 2'd1) ? {1'b0, s2_term3} :
-                         (s2_sign3 == 2'd2) ? -{1'b0, s2_term3} : 0;
-                    sum_raw = $unsigned(t1 + t2 + t3);
-                end else begin
-                    // Two-term addition (FMA mode)
-                    reg signed [INT_W:0] t1, t2;
-                    t1 = (s2_sign1 == 2'd1) ? {1'b0, s2_term1} :
-                         (s2_sign1 == 2'd2) ? -{1'b0, s2_term1} : 0;
-                    t2 = (s2_sign2 == 2'd1) ? {1'b0, s2_term2} :
-                         (s2_sign2 == 2'd2) ? -{1'b0, s2_term2} : 0;
-                    sum_raw = $unsigned(t1 + t2);
-                end
+                // Signed addition: sign[1]=1 means negative, sign=0 implies term=0
+                reg signed [INT_W:0] t1, t2, t3;
+                t1 = s2_sign1[1] ? -{1'b0, s2_term1} : {1'b0, s2_term1};
+                t2 = s2_sign2[1] ? -{1'b0, s2_term2} : {1'b0, s2_term2};
+                t3 = s2_sign3[1] ? -{1'b0, s2_term3} : {1'b0, s2_term3};
+                sum_raw = $unsigned(t1 + t2 + t3);
 
                 result_sign = sum_raw[INT_W];
                 sum_abs = result_sign ? (~sum_raw[INT_W-1:0] + 1'b1) : sum_raw[INT_W-1:0];
@@ -508,7 +434,6 @@ module fma_fp32_dot3 (
                 s3_result_sign <= result_sign;
                 s3_mant        <= sum_abs;
                 s3_lod         <= lod[4:0];
-                s3_result_is_zero <= (sum_abs == 0);
             end
         end
     end
@@ -524,10 +449,13 @@ module fma_fp32_dot3 (
             valid_o <= s3_valid;
 
             if (s3_valid) begin
-                if (s3_special != 2'd0) begin
-                    // Special case: use pre-computed result from S1
-                    y_o <= s3_special_result;
-                end else if (s3_result_is_zero) begin
+                if (s3_special == 2'd1) begin
+                    y_o <= 32'h7FC00000;  // qNaN
+                end else if (s3_special == 2'd2) begin
+                    y_o <= 32'h7F800000;  // +Inf
+                end else if (s3_special == 2'd3) begin
+                    y_o <= 32'hFF800000;  // -Inf
+                end else if (s3_mant == 0) begin
                     y_o <= 32'h00000000;
                 end else begin
                     reg [8:0]  norm_exp_9;  // 9-bit to detect underflow
@@ -563,12 +491,11 @@ module fma_fp32_dot3 (
                         end
                     end
 
-                    // Output FTZ: subnormal (exp <= 0) → flush to zero
-                    // Underflow detected via bit 8 or norm_exp_9 == 0
+                    // Output FTZ: subnormal (exp <= 0) -> flush to zero
                     if (norm_exp_9[8] || norm_exp_9 == 9'd0) begin
                         y_o <= 32'h00000000;
                     end else if (norm_exp_9 >= 9'hFF) begin
-                        // Overflow → Inf
+                        // Overflow -> Inf
                         y_o <= {s3_result_sign, 8'hFF, 23'd0};
                     end else begin
                         y_o <= {s3_result_sign, norm_exp[7:0], norm_mant[22:0]};
